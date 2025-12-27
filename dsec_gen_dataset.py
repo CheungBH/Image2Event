@@ -31,18 +31,19 @@ def generate_metadata(base_dir, event_metas):
     images_dir = os.path.join(base_dir, "images")
     cond_dir = os.path.join(base_dir, "conditioning_images")
     optical_flows_dir = os.path.join(base_dir, "optical_flow")
-    prompt_tpl = "convert to event frame using {} method"
+    prompt_tpl = "convert to event frame using going {} method"
     image_files, cond_files = [], []
     metadata = []
 
     for file in os.listdir(cond_dir):
         # if file.endswith('.png') or file.endswith('.jpg'):
-        for event_name, event_prompt in zip(event_names, prompts):
+        for event_name in event_names:
             cond_files.append(os.path.join(cond_dir, file))
             base_name = os.path.splitext(file)[0]
             image_file = os.path.join(images_dir, f"{base_name}-{event_name}")
             image_files.append(image_file)
-            prompt = prompt_tpl.format(event_prompt)
+            prompt_kw = "reverse" if "reverse" in base_name.lower() else "forward"
+            prompt = prompt_tpl.format(prompt_kw)
             metadata.append({
                 "text": prompt,
                 "image": "/".join(image_file.split("/")[-2:]),
