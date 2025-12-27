@@ -59,8 +59,8 @@ def generate_metadata(base_dir, event_metas):
 
 
 if __name__ == '__main__':
-    root_folder = "data/DSEC_dataset/train"
-    output_folder = "data/RAFT_flow_dataset/train"
+    root_folder = "data/DSEC_dataset/test"
+    output_folder = "data/RAFT_flow_dataset/test"
     event_targets = ["event.png"]
     event_prompts = ["Accumulation going forward"]
 
