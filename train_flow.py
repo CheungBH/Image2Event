@@ -8,7 +8,7 @@ import cv2
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-
+import evaluate_flow
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -154,7 +154,7 @@ def train(args):
 
     total_steps = 0
     scaler = GradScaler(enabled=args.mixed_precision)
-    logger = Logger(model, scheduler)
+    logger = Logger(model, scheduler, log_dir=out_dir)
 
 
     should_keep_training = True
@@ -193,7 +193,8 @@ def train(args):
                         if val_dataset == 'KITTI':
                             evaluate_flow.validate_kitti(model.module)
                         elif val_dataset == 'DSEC_RAFT':
-                            evaluate_flow.validate_dsec(model.module)
+                            dsec_root = getattr(settings, 'dsec_root', args.dataset_root)
+                            evaluate_flow.validate_dsec(model.module, root=dsec_root, split='test')
 
                 model.train()
 

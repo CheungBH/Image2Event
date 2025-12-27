@@ -171,10 +171,12 @@ if __name__ == '__main__':
     model.eval()
     
     if args.dataset == 'KITTI':
-        create_kitti_submission(model.module)
-        with torch.no_grad():
-            validate_kitti(model.module)
-            create_kitti_submission(model.module, output_path='kitti_submission_former')
+        if args.phase == 'test':
+             create_kitti_submission(model.module)
+        else:
+             with torch.no_grad():
+                validate_kitti(model.module, split='training')
     elif args.dataset == 'DSEC_RAFT':
+        dsec_root = getattr(settings, 'dsec_root', args.dataset_root)
         with torch.no_grad():
-            validate_dsec(model.module)
+            validate_dsec(model.module, root=dsec_root, split=args.phase)
