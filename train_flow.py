@@ -62,8 +62,18 @@ def sequence_loss(flow_preds, flow_gt, valid, gamma=0.8, max_flow=MAX_FLOW):
     epe = torch.sum((flow_preds[-1] - flow_gt)**2, dim=1).sqrt()
     epe = epe.view(-1)[valid.view(-1)]
 
+    # Angular error
+    flow_pred = flow_preds[-1]
+    dot = torch.sum(flow_pred * flow_gt, dim=1)
+    mag_pred = torch.sum(flow_pred**2, dim=1).sqrt()
+    cos = dot / (mag_pred * mag + 1e-8)
+    cos = torch.clamp(cos, -1.0, 1.0)
+    angle = torch.acos(cos) * 180.0 / np.pi
+    angle = angle.view(-1)[valid.view(-1)]
+
     metrics = {
         'epe': epe.mean().item(),
+        'angle': angle.mean().item(),
         '1px': (epe < 1).float().mean().item(),
         '3px': (epe < 3).float().mean().item(),
         '5px': (epe < 5).float().mean().item(),
@@ -99,6 +109,9 @@ class Logger:
         metrics_str = ("{:10.4f}, "*len(metrics_data)).format(*metrics_data)
         
         # print the training status
+        if self.total_steps + 1 <= SUM_FREQ:
+             print(f"Step, LR, {', '.join(sorted(self.running_loss.keys()))}")
+
         print(training_str + metrics_str)
 
         for k in self.running_loss:
