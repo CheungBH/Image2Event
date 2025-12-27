@@ -654,26 +654,6 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--train_dataset_name",
-        type=str,
-        default=None,
-        help=(
-            "The name of the Dataset (from the HuggingFace hub) to train on (could be your own, possibly private,"
-            " dataset). It can also be a path pointing to a local copy of a dataset in your filesystem,"
-            " or to a folder containing files that 🤗 Datasets can understand."
-        ),
-    )
-    parser.add_argument(
-        "--validation_dataset_name",
-        type=str,
-        default=None,
-        help=(
-            "The name of the Dataset (from the HuggingFace hub) to train on (could be your own, possibly private,"
-            " dataset). It can also be a path pointing to a local copy of a dataset in your filesystem,"
-            " or to a folder containing files that 🤗 Datasets can understand."
-        ),
-    )
-    parser.add_argument(
         "--dataset_config_name",
         type=str,
         default=None,
@@ -844,15 +824,23 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
         if phase == "train":
             if args.train_data_dir is not None:
                 dataset = load_dataset(
-                    args.train_data_dir,
+                    os.path.join(args.train_data_dir, "dataset_script.py"),
+                    args.dataset_config_name,
                     cache_dir=args.cache_dir,
+                    data_dir=args.train_data_dir,
+                    trust_remote_code=True
                 )
+
         else:
             if args.validation_data_dir is not None:
                 dataset = load_dataset(
-                    args.validation_data_dir,
+                    os.path.join(args.validation_data_dir, "dataset_script.py"),
+                    args.dataset_config_name,
                     cache_dir=args.cache_dir,
+                    data_dir=args.validation_data_dir,
+                    trust_remote_code=True
                 )
+
         # See more about loading custom images at
         # https://huggingface.co/docs/datasets/v2.0.0/en/dataset_script
 
