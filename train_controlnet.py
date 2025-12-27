@@ -54,7 +54,7 @@ from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
-from utils_opticalflow import load_flow, flow_16bit_to_float, flow_rescale
+from utils import load_flow, flow_16bit_to_float, flow_rescale
 from utils import get_vis_sample
 from eval_quality import calculate_metrics
 
@@ -241,7 +241,7 @@ if is_wandb_available():
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 # check_min_version("0.33.0.dev0")
-from utils_opticalflow import *
+# from utils_opticalflow import *
 
 logger = get_logger(__name__)
 
