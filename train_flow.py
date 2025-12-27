@@ -92,7 +92,6 @@ class Logger:
         self.scheduler = scheduler
         self.total_steps = 0
         self.running_loss = {}
-        self.writer = None
 
     def _print_training_status(self):
         metrics_data = [self.running_loss[k]/SUM_FREQ for k in sorted(self.running_loss.keys())]
@@ -102,11 +101,7 @@ class Logger:
         # print the training status
         print(training_str + metrics_str)
 
-        if self.writer is None:
-            self.writer = SummaryWriter()
-
         for k in self.running_loss:
-            self.writer.add_scalar(k, self.running_loss[k]/SUM_FREQ, self.total_steps)
             self.running_loss[k] = 0.0
 
     def push(self, metrics):
@@ -123,14 +118,10 @@ class Logger:
             self.running_loss = {}
 
     def write_dict(self, results):
-        if self.writer is None:
-            self.writer = SummaryWriter()
-
-        for key in results:
-            self.writer.add_scalar(key, results[key], self.total_steps)
+        pass
 
     def close(self):
-        self.writer.close()
+        pass
 
 
 def train(args):
@@ -182,6 +173,14 @@ def train(args):
             if total_steps % VAL_FREQ == VAL_FREQ - 1:
                 PATH = os.path.join(out_dir, '{:06d}.pth'.format(total_steps))
                 torch.save(model.state_dict(), PATH)
+
+                model.eval()
+                if args.validation is not None:
+                    for val_dataset in args.validation:
+                        if val_dataset == 'KITTI':
+                            evaluate_flow.validate_kitti(model.module)
+                        elif val_dataset == 'DSEC_RAFT':
+                            evaluate_flow.validate_dsec(model.module)
 
                 model.train()
 

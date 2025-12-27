@@ -11,7 +11,8 @@ import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 
-import datasets
+import RAFT.datasets as datasets
+
 from RAFT.utils import flow_viz
 from RAFT.utils import frame_utils
 
@@ -43,6 +44,57 @@ def create_kitti_submission(model, iters=24, output_path='kitti_submission'):
         output_filename = os.path.join(output_path, frame_id)
         frame_utils.writeFlowKITTI(output_filename, flow)
 
+
+@torch.no_grad()
+def validate_dsec(model, iters=24):
+    """ Perform validation using the DSEC_RAFT dataset """
+    model.eval()
+    val_dataset = datasets.DSECRAFT(split='train')
+
+    out_list, epe_list, angle_list = [], [], []
+    for val_id in range(len(val_dataset)):
+        image1, image2, flow_gt, valid_gt = val_dataset[val_id]
+        image1 = image1[None].cuda()
+        image2 = image2[None].cuda()
+
+        padder = InputPadder(image1.shape, mode='kitti')
+        image1, image2 = padder.pad(image1, image2)
+
+        _, flow_pr = model(image1, image2, iters=iters, test_mode=True)
+        flow = padder.unpad(flow_pr[0]).cpu()
+
+        epe = torch.sum((flow - flow_gt)**2, dim=0).sqrt()
+        mag = torch.sum(flow_gt**2, dim=0).sqrt()
+
+        epe = epe.view(-1)
+        mag = mag.view(-1)
+        val = valid_gt.view(-1) >= 0.5
+
+        # Direction (angular) error
+        flow_flat = flow.view(2, -1)[:, val].numpy()
+        flow_gt_flat = flow_gt.view(2, -1)[:, val].numpy()
+        dot = np.sum(flow_flat * flow_gt_flat, axis=0)
+        norm_pred = np.linalg.norm(flow_flat, axis=0)
+        norm_gt = np.linalg.norm(flow_gt_flat, axis=0)
+        cos_angle = dot / (norm_pred * norm_gt + 1e-8)
+        cos_angle = np.clip(cos_angle, -1, 1)
+        angle = np.arccos(cos_angle) * 180.0 / np.pi
+        angle_list.append(angle)
+
+        out = ((epe > 3.0) & ((epe/mag) > 0.05)).float()
+        epe_list.append(epe[val].mean().item())
+        out_list.append(out[val].cpu().numpy())
+
+    epe_list = np.array(epe_list)
+    out_list = np.concatenate(out_list)
+    angle_list = np.concatenate(angle_list)
+
+    epe = np.mean(epe_list)
+    f1 = 100 * np.mean(out_list)
+    mean_angle = np.mean(angle_list)
+
+    print("Validation DSEC: EPE=%f, F1=%f, Angle=%f" % (epe, f1, mean_angle))
+    return {'dsec-epe': epe, 'dsec-f1': f1, 'dsec-angle': mean_angle}
 
 
 @torch.no_grad()
@@ -102,6 +154,7 @@ def validate_kitti(model, iters=24):
     print("Validation KITTI: EPE=%f, F1=%f, Angle=%f" % (epe, f1, mean_angle))
     return {'kitti-epe': epe, 'kitti-f1': f1, 'kitti-angle': mean_angle}
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', help="restore checkpoint")
@@ -116,10 +169,12 @@ if __name__ == '__main__':
 
     model.cuda()
     model.eval()
-    create_kitti_submission(model.module)
-
-    with torch.no_grad():
-        validate_kitti(model.module)
-        create_kitti_submission(model.module, output_path='kitti_submission_former')
-
-
+    
+    if args.dataset == 'KITTI':
+        create_kitti_submission(model.module)
+        with torch.no_grad():
+            validate_kitti(model.module)
+            create_kitti_submission(model.module, output_path='kitti_submission_former')
+    elif args.dataset == 'DSEC_RAFT':
+        with torch.no_grad():
+            validate_dsec(model.module)
