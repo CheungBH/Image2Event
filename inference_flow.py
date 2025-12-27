@@ -16,6 +16,45 @@ from RAFT.utils.utils import InputPadder
 DEVICE = 'cuda'
 
 
+def visualize_optical_flow(flow, frame):
+    """Generates a visualization of the optical flow field."""
+    h, w = frame.shape[:2]
+    step = 16
+    y, x = np.mgrid[step/2:h:step, step/2:w:step].reshape(2, -1).astype(int)
+    fx, fy = flow[y, x].T
+    lines = np.vstack([x, y, x + fx, y + fy]).T.reshape(-1, 2, 2)
+    lines = np.int32(lines + 0.5)
+    vis = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    cv2.polylines(vis, lines, 0, (0, 255, 0))
+    for (x1, y1), (_x2, _y2) in lines:
+        cv2.circle(vis, (x1, y1), 1, (0, 255, 0), -1)
+    vis = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
+    return vis
+
+def flow_to_image(flow, max_flow=10.0):
+    """
+    将光流数据转换为可视化图像（颜色过渡更平滑）
+
+    参数:
+        flow (np.ndarray): 光流数据，形状 (H, W, 2)
+        max_flow (float): 最大光流值，用于归一化（默认10.0）
+
+    返回:
+        np.ndarray: BGR 格式的可视化图像
+    """
+    magnitude, angle = cv2.cartToPolar(flow[..., 0], flow[..., 1], angleInDegrees=True)
+    magnitude = np.clip(magnitude / max_flow, 0, 1)
+
+    hsv = np.zeros((flow.shape[0], flow.shape[1], 3), dtype=np.uint8)
+
+    hue = (angle % 360) / 2  # 0-180度范围
+    hsv[..., 0] = np.clip(hue, 0, 179).astype(np.uint8)
+    hsv[..., 1] = magnitude * 255  # 饱和度表示速度
+    hsv[..., 2] = 255  # 明度
+
+    img = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+    return img
+
 def add_label(image, label, color):
     img = image.copy()
     cv2.putText(img, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2, cv2.LINE_AA)
