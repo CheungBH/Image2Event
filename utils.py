@@ -83,7 +83,7 @@ def get_vis_sample(dataset, sample_num=8, resolution=512):
         samples = dataset[i]
         imgs.append(resize_and_center_crop(samples['conditioning_image'], (resolution, resolution)))
         prompts.append(samples['text'])
-        flows.append(samples['optical_flow'])
+        flows.append(samples['optical_flow_resized'])
         targets.append(resize_and_center_crop(samples['image'], (resolution, resolution)))
         warped_images.append(resize_and_center_crop(samples['warped_image'], (resolution, resolution)))
     return imgs, prompts, targets, flows, warped_images
@@ -137,8 +137,8 @@ def visualize(
             with inference_ctx:
                 np_img = np.array(validation_image).astype(np.float32) / 255.0
                 # np_img = np_img[None]#.transpose(0, 3, 1, 2)
-                resized_flow = np.resize(validation_flow, (2, 512, 512)).transpose(1, 2, 0)
-                resized_flow = resized_flow.astype(np.float32) / flow_normalize_factor
+                # resized_flow = np.resize(validation_flow, (2, 512, 512)).transpose(1, 2, 0)
+                resized_flow = validation_flow.astype(np.float32) / flow_normalize_factor
                 if args.add_warped_image:
                     np_warped_img = np.array(validation_warped_image).astype(np.float32) / 255.0
                     # np_warped_img = np_warped_img[None]#.transpose(0, 3, 1, 2)

@@ -57,7 +57,6 @@ from diffusers.utils.torch_utils import is_compiled_module
 from utils_opticalflow import load_flow, flow_16bit_to_float, flow_rescale
 
 
-
 def tensor_to_image(tensor, save_path):
     """
     Convert a normalized tensor to an image and save it.
@@ -88,13 +87,13 @@ def tensor_to_image(tensor, save_path):
     image.save(save_path)
 
 
-
 if is_wandb_available():
     import wandb
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 # check_min_version("0.33.0.dev0")
 from utils_opticalflow import *
+
 logger = get_logger(__name__)
 
 
@@ -110,7 +109,7 @@ def image_grid(imgs, rows, cols):
 
 
 def log_validation(
-    vae, text_encoder, tokenizer, unet, controlnet, args, accelerator, weight_dtype, step, is_final_validation=False
+        vae, text_encoder, tokenizer, unet, controlnet, args, accelerator, weight_dtype, step, is_final_validation=False
 ):
     logger.info("Running validation... ")
 
@@ -296,7 +295,7 @@ def parse_args(input_args=None):
         type=str,
         default=None,
         help="Path to pretrained controlnet model or model identifier from huggingface.co/models."
-        " If not specified controlnet weights are initialized from unet.",
+             " If not specified controlnet weights are initialized from unet.",
     )
     parser.add_argument(
         "--revision",
@@ -418,6 +417,17 @@ def parse_args(input_args=None):
         help="Number of hard resets of the lr in cosine_with_restarts scheduler.",
     )
     parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.")
+    parser.add_argument(
+        "--use_bce",
+        action="store_true",
+        help="Use BCE against binary labels as image loss; otherwise use image MSE",
+    )
+    parser.add_argument(
+        "--image_loss_weight",
+        type=float,
+        default=1.0,
+        help="Weight for image loss (BCE if --use_bce else MSE)",
+    )
     parser.add_argument(
         "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
     )
@@ -637,11 +647,11 @@ def parse_args(input_args=None):
         raise ValueError("`--validation_prompt` must be set if `--validation_image` is set")
 
     if (
-        args.validation_image is not None
-        and args.validation_prompt is not None
-        and len(args.validation_image) != 1
-        and len(args.validation_prompt) != 1
-        and len(args.validation_image) != len(args.validation_prompt)
+            args.validation_image is not None
+            and args.validation_prompt is not None
+            and len(args.validation_image) != 1
+            and len(args.validation_prompt) != 1
+            and len(args.validation_image) != len(args.validation_prompt)
     ):
         raise ValueError(
             "Must provide either 1 `--validation_image`, 1 `--validation_prompt`,"
@@ -753,16 +763,25 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
 
     image_transforms = transforms.Compose(
         [
-            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            # transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
+            # transforms.Normalize([0.5], [0.5]),
+        ]
+    )
+
+    binary_label_transform = transforms.Compose(
+        [
+            # transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(args.resolution),
+            # transforms.ToTensor(),
+            # transforms.Normalize([0.5], [0.5]),
         ]
     )
 
     conditioning_image_transforms = transforms.Compose(
         [
-            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            # transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
         ]
@@ -784,21 +803,44 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
         conditioning_images = [conditioning_image_transforms(image) for image in conditioning_images]
         # flow_paths = [flow_path.replace("-Accumulate", "") for flow_path in examples["optical_flow"]]
         optical_flows = []
-        warped_image_paths = [i.replace("png", "jpg").replace("optical_flow", "warped_images") for i in examples["optical_flow"]]
+        optical_flows_resized = []
+        warped_image_paths = [i.replace("png", "jpg").replace("optical_flow", "warped_images") for i in
+                              examples["optical_flow"]]
         for flow_path in examples["optical_flow"]:
             # flow, valid2D = load_flow(Path(flow_path), valid_in_3rd_channel=False)
-            flow = np.load(flow_path)
-            flow = np.squeeze(flow).transpose(1, 2, 0)
-            flow_h, flow_w = flow.shape[0], flow.shape[1]
-            flow = optical_flow_transforms(flow)
-            optical_flows.append(flow_rescale(flow, (flow_w, flow_h), (args.resolution, args.resolution)))
+            flow_raw = np.load(flow_path)
+            flow_raw = np.squeeze(flow_raw).transpose(1, 2, 0)
+            flow_h, flow_w = flow_raw.shape[0], flow_raw.shape[1]
+            flow = optical_flow_transforms(flow_raw)
+            optical_flows.append(flow)
+            resized_flow = np.resize(flow_raw, (args.resolution, args.resolution, 2))
+            optical_flows_resized.append(
+                flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution)))
 
+            # flow_raw = np.load(flow_path)
+            # flow_raw = np.squeeze(flow_raw).transpose(1, 2, 0)
+            # flow_h, flow_w = flow_raw.shape[0], flow_raw.shape[1]
+            # flow = optical_flow_transforms(flow_raw)
+            # optical_flows.append(flow)
+            # flow_resized = resize_and_center_crop(flow_raw, (args.resolution, args.resolution))
+            # optical_flows_resized.append(flow_rescale(flow_resized, (flow_w, flow_h), (args.resolution, args.resolution)))
         # warp_image_path = examples.get("warped_image", None)
         examples["pixel_values"] = images
         examples["conditioning_pixel_values"] = conditioning_images
         examples["input_ids"] = tokenize_captions(examples)
         examples["optical_flow"] = optical_flows
+        examples["optical_flow_resized"] = optical_flows_resized
         examples["warped_image"], examples["warped_pixel_values"] = [], []
+        examples["binary_label"] = []
+        for idx in range(len(examples["optical_flow"])):
+            img = np.array(Image.open(examples["image"][idx].filename).convert("RGB"))
+            img_binary = (img > 127).astype(np.int_)
+            PIL_img_binary = Image.fromarray((img_binary).astype(np.uint8))
+            cropped_binary = binary_label_transform(PIL_img_binary)
+            tns_binary = torch.from_numpy(np.array(cropped_binary)).float()
+            # convert from 512,512,3 to 3,512,512
+            examples["binary_label"].append(tns_binary.permute(2, 0, 1))
+
         if args.add_warped_image:
             for warped_image_path in warped_image_paths:
                 warped_image = Image.open(warped_image_path).convert("RGB")
@@ -806,8 +848,11 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
                 warped_image = conditioning_image_transforms(warped_image)
                 examples["warped_pixel_values"].append(warped_image)
         else:
-            examples["warped_pixel_values"] = [torch.zeros_like(conditioning_images[0]) for _ in range(len(conditioning_images))]
-            examples["warped_image"] = [Image.fromarray((np.zeros((args.resolution, args.resolution, 3))).astype(np.uint8)) for _ in range(len(conditioning_images))]
+            examples["warped_pixel_values"] = [torch.zeros_like(conditioning_images[0]) for _ in
+                                               range(len(conditioning_images))]
+            examples["warped_image"] = [
+                Image.fromarray((np.zeros((args.resolution, args.resolution, 3))).astype(np.uint8)) for _ in
+                range(len(conditioning_images))]
 
         return examples
 
@@ -830,6 +875,7 @@ def collate_fn(examples):
     optical_flow_values = torch.stack([example["optical_flow"] for example in examples])
     warped_image = torch.stack([example["warped_pixel_values"] for example in examples])
     input_ids = torch.stack([example["input_ids"] for example in examples])
+    binary_label = torch.stack([example["binary_label"] for example in examples])
 
     return {
         "pixel_values": pixel_values,
@@ -837,6 +883,7 @@ def collate_fn(examples):
         "input_ids": input_ids,
         "optical_flow": optical_flow_values,
         "warped_pixel_values": warped_image,
+        "binary_label": binary_label,
     }
 
 
@@ -1007,7 +1054,7 @@ def main(args):
 
     if args.scale_lr:
         args.learning_rate = (
-            args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
+                args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
         )
 
     # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
@@ -1049,7 +1096,7 @@ def main(args):
         validation_dataset,
         shuffle=False,
         collate_fn=collate_fn,
-        batch_size=args.train_batch_size*2,
+        batch_size=args.train_batch_size * 2,
         num_workers=args.dataloader_num_workers,
     )
 
@@ -1154,10 +1201,9 @@ def main(args):
         disable=not accelerator.is_local_main_process,
     )
 
-    image_logs = None
-
     if accelerator.is_main_process:
-        sample_imgs, sample_prompts, sample_targets, sample_flows, sample_warp_images = get_vis_sample(validation_dataset, resolution=args.resolution)
+        sample_imgs, sample_prompts, sample_targets, sample_flows, sample_warp_images = get_vis_sample(
+            validation_dataset, resolution=args.resolution)
         vis_imgs = visualize(
             sample_prompts,
             sample_imgs,
@@ -1265,7 +1311,29 @@ def main(args):
                     target = noise_scheduler.get_velocity(latents, noise, timesteps)
                 else:
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                loss_noise = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+
+                alphas_cumprod = noise_scheduler.alphas_cumprod.to(latents.device)
+                alpha_t = alphas_cumprod[timesteps].view(bsz, 1, 1, 1)
+                sqrt_alpha_t = torch.sqrt(alpha_t)
+                sqrt_one_minus_alpha_t = torch.sqrt(1.0 - alpha_t)
+                if noise_scheduler.config.prediction_type == "epsilon":
+                    x0_pred = (noisy_latents - sqrt_one_minus_alpha_t * model_pred) / sqrt_alpha_t
+                elif noise_scheduler.config.prediction_type == "v_prediction":
+                    x0_pred = sqrt_alpha_t * noisy_latents - sqrt_one_minus_alpha_t * model_pred
+                else:
+                    x0_pred = noisy_latents
+
+                decoded = vae.decode(x0_pred / vae.config.scaling_factor).sample
+
+                if args.use_bce:
+                    pred_prob = torch.clamp((decoded.float() + 1.0) / 2.0, 0.0, 1.0)
+                    label_prob = batch["binary_label"].to(dtype=pred_prob.dtype)
+                    loss_img = F.binary_cross_entropy(pred_prob, label_prob)
+                else:
+                    loss_img = F.mse_loss(decoded.float(), batch["pixel_values"].float(), reduction="mean")
+
+                loss = loss_noise + args.image_loss_weight * loss_img
                 train_loss += loss.detach().item()
 
                 accelerator.backward(loss)
@@ -1391,13 +1459,31 @@ def main(args):
                 else:
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
-            val_loss += F.mse_loss(model_pred.float(), target.float(), reduction="mean").detach().item()
+            loss_noise = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+            alphas_cumprod = noise_scheduler.alphas_cumprod.to(latents.device)
+            alpha_t = alphas_cumprod[timesteps].view(bsz, 1, 1, 1)
+            sqrt_alpha_t = torch.sqrt(alpha_t)
+            sqrt_one_minus_alpha_t = torch.sqrt(1.0 - alpha_t)
+            if noise_scheduler.config.prediction_type == "epsilon":
+                x0_pred = (noisy_latents - sqrt_one_minus_alpha_t * model_pred) / sqrt_alpha_t
+            elif noise_scheduler.config.prediction_type == "v_prediction":
+                x0_pred = sqrt_alpha_t * noisy_latents - sqrt_one_minus_alpha_t * model_pred
+            else:
+                x0_pred = noisy_latents
+            decoded = vae.decode(x0_pred / vae.config.scaling_factor).sample
+            if args.use_bce:
+                pred_prob = torch.clamp((decoded.float() + 1.0) / 2.0, 0.0, 1.0)
+                label_prob = batch["binary_label"].to(dtype=pred_prob.dtype)
+                loss_img = F.binary_cross_entropy(pred_prob, label_prob)
+            else:
+                loss_img = F.mse_loss(decoded.float(), batch["pixel_values"].float(), reduction="mean")
+
+            val_loss += (loss_noise + args.image_loss_weight * loss_img).detach().item()
         avg_val_loss = val_loss / len(validation_dataloader)
 
         logger.info(f"Valid: Epoch {epoch} average loss: {avg_val_loss}")
         out_f.write(f"Valid: Epoch {epoch} average loss: {avg_val_loss}\n")
         out_f.flush()
-
 
         if accelerator.is_main_process:
             sample_imgs, sample_prompts, sample_targets, sample_flows, sample_warp_images = get_vis_sample(
@@ -1417,7 +1503,7 @@ def main(args):
                 weight_dtype,
                 flow_normalize_factor=args.of_norm_factor
             )
-            vis_dir = os.path.join(args.output_dir, "visualize/epoch-{}".format(epoch+1))
+            vis_dir = os.path.join(args.output_dir, "visualize/epoch-{}".format(epoch + 1))
             os.makedirs(vis_dir, exist_ok=True)
             for idx, (vis_log, vis_target) in enumerate(zip(vis_imgs, sample_targets)):
                 images = vis_log["images"]
@@ -1447,7 +1533,6 @@ def main(args):
                 concat_image = np.concatenate([prompt_image, concat_image], axis=0)
                 image_name = os.path.join(vis_dir, "{}_{}.png".format(idx, validation_prompt))
                 cv2.imwrite(image_name, concat_image)
-
 
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()

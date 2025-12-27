@@ -15,8 +15,8 @@ def create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_fold
             rgb_image_path = os.path.join(folder_path, sample, "raw.png")
             out_rgb_image_path = os.path.join(out_rgb_folder, "{}-{}.jpg".format(folder, sample))
             os.system(f"cp {rgb_image_path} {out_rgb_image_path}")
-            optical_flow_path = os.path.join(folder_path, sample, "flow_up.npy")
-            out_optical_flow_path = os.path.join(out_flow_folder, "{}-{}-flow_up.npy".format(folder, sample))
+            optical_flow_path = os.path.join(folder_path, sample, "flow.npy")
+            out_optical_flow_path = os.path.join(out_flow_folder, "{}-{}-flow.npy".format(folder, sample))
             os.system(f"cp {optical_flow_path} {out_optical_flow_path}")
             for event_target in event_targets:
                 event_image_path = os.path.join(folder_path, sample, event_target)
@@ -59,10 +59,10 @@ def generate_metadata(base_dir, event_metas):
 
 
 if __name__ == '__main__':
-    root_folder = "data/RAFT_flow_original/train_direction"
+    root_folder = "data/DSEC_dataset/train"
     output_folder = "data/RAFT_flow_dataset/train"
-    event_targets = ["Accumulate-forward.png", "Accumulate-reverse.png"]
-    event_prompts = ["Accumulation going forward", "Accumulation going reverse"]
+    event_targets = ["event.png"]
+    event_prompts = ["Accumulation going forward"]
 
     def remove_all_DS_Store(path):
         for root, dirs, files in os.walk(path):
@@ -79,4 +79,4 @@ if __name__ == '__main__':
     os.makedirs(out_flow_folder, exist_ok=True)
     create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_folder, event_targets=event_targets)
     generate_metadata(output_folder, event_metas=[event_targets, event_prompts])
-    os.system("cp dataset_script_opticalflow.py {}".format(output_folder))
+    os.system("cp dataset_script.py {}".format(output_folder))
