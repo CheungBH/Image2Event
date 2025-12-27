@@ -55,6 +55,155 @@ from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 from utils_opticalflow import load_flow, flow_16bit_to_float, flow_rescale
+from utils import get_vis_sample
+from eval_quality import calculate_metrics
+
+def run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, epoch):
+    if accelerator.is_main_process:
+        sample_imgs, sample_prompts, sample_targets, sample_flows, sample_warp_images = get_vis_sample(
+            validation_dataset, resolution=args.resolution)
+        
+        pipeline = StableDiffusionControlNetPipeline(
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            unet=unet,
+            controlnet=accelerator.unwrap_model(controlnet),
+            scheduler=UniPCMultistepScheduler.from_config(unet.config),
+            safety_checker=None,
+            feature_extractor=None,
+        )
+        pipeline.set_progress_bar_config(disable=True)
+        if args.enable_xformers_memory_efficient_attention:
+            pipeline.enable_xformers_memory_efficient_attention()
+        pipeline = pipeline.to(accelerator.device)
+        
+        vis_dir = os.path.join(args.output_dir, "visualize/epoch-{}".format(epoch))
+        os.makedirs(vis_dir, exist_ok=True)
+        
+        inference_ctx = torch.autocast("cuda")
+        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed) if args.seed else None
+        
+        for idx, (validation_prompt, validation_image, validation_flow, validation_warped_image, vis_target) in enumerate(zip(sample_prompts, sample_imgs, sample_flows, sample_warp_images, sample_targets)):
+            images = []
+            for _ in range(args.num_validation_images):
+                with inference_ctx:
+                    np_img = np.array(validation_image).astype(np.float32) / 255.0
+                    resized_flow = validation_flow.astype(np.float32) / args.of_norm_factor
+                    
+                    if args.add_warped_image:
+                        np_warped_img = np.array(validation_warped_image).astype(np.float32) / 255.0
+                        merged_input = np.concatenate([np_img, np_warped_img, resized_flow], axis=2)
+                    else:
+                        merged_input = np.concatenate([np_img, resized_flow], axis=2)
+                    merged_input = merged_input[None].astype(np.float32)
+
+                    image = pipeline(
+                        validation_prompt, merged_input, num_inference_steps=20, generator=generator
+                    ).images[0]
+                    images.append(image)
+            
+            validation_image_np = np.asarray(validation_image.convert("RGB"))
+            validation_target_np = np.asarray(vis_target.convert("RGB"))
+            
+            formatted_images = [validation_target_np, validation_image_np]
+            for image in images:
+                formatted_images.append(np.asarray(image))
+            
+            concat_image = np.concatenate(formatted_images, axis=1)
+            
+            prompt_image = np.ones((100, concat_image.shape[1], 3), dtype=np.uint8) * 255
+            cv2.putText(
+                prompt_image,
+                validation_prompt,
+                (10, 50),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                2,
+                (0, 0, 0),
+                2,
+                cv2.LINE_AA,
+            )
+            concat_image = np.concatenate([prompt_image, concat_image], axis=0)
+            concat_image = cv2.cvtColor(concat_image, cv2.COLOR_RGB2BGR)
+            
+            image_name = os.path.join(vis_dir, "{}_{}.png".format(idx, validation_prompt[:50].replace("/", "_")))
+            cv2.imwrite(image_name, concat_image)
+            
+        del pipeline
+        torch.cuda.empty_cache()
+
+
+def run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, epoch, out_f, train_loss=0.0, valid_loss=0.0, lr=0.0):
+    if accelerator.is_main_process:
+        # Create directories
+        pred_dir = os.path.join(args.output_dir, f"validation_images/pred")
+        gt_dir = os.path.join(args.output_dir, f"validation_images/gt")
+        os.makedirs(pred_dir, exist_ok=True)
+        os.makedirs(gt_dir, exist_ok=True)
+
+        pipeline = StableDiffusionControlNetPipeline(
+            vae=vae,
+            text_encoder=text_encoder,
+            tokenizer=tokenizer,
+            unet=unet,
+            controlnet=accelerator.unwrap_model(controlnet),
+            scheduler=UniPCMultistepScheduler.from_config(unet.config),
+            safety_checker=None,
+            feature_extractor=None,
+        )
+        pipeline.set_progress_bar_config(disable=True)
+        if args.enable_xformers_memory_efficient_attention:
+            pipeline.enable_xformers_memory_efficient_attention()
+        pipeline = pipeline.to(accelerator.device)
+
+        inference_ctx = torch.autocast("cuda")
+        generator = torch.Generator(device=accelerator.device).manual_seed(args.seed) if args.seed else None
+
+        for batch in tqdm(validation_dataloader, desc="Running Full Validation"):
+            prompts = batch["prompts"]
+            filenames = batch["filenames"]
+            
+            cond_imgs = batch["conditioning_pixel_values"].to(accelerator.device)
+            flows = batch["optical_flow"].to(accelerator.device)
+            flows = flows / args.of_norm_factor
+            
+            warped_imgs = batch["warped_pixel_values"].to(accelerator.device)
+            gt_imgs = batch["pixel_values"].to(accelerator.device)
+            
+            if args.add_warped_image:
+                control = torch.cat([cond_imgs, warped_imgs, flows], dim=1)
+            else:
+                control = torch.cat([cond_imgs, flows], dim=1)
+                
+            with inference_ctx:
+                images = pipeline(
+                    prompts,
+                    image=control,
+                    num_inference_steps=20,
+                    generator=generator,
+                    output_type="np"
+                ).images
+            
+            for i, image in enumerate(images):
+                filename = filenames[i]
+                image_bgr = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                cv2.imwrite(os.path.join(pred_dir, filename), image_bgr)
+                
+                gt_path = os.path.join(gt_dir, filename)
+                if not os.path.exists(gt_path):
+                    gt_img_np = gt_imgs[i].permute(1, 2, 0).cpu().numpy()
+                    gt_img_bgr = cv2.cvtColor((gt_img_np * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                    cv2.imwrite(gt_path, gt_img_bgr)
+
+        del pipeline
+        torch.cuda.empty_cache()
+        
+        metrics = calculate_metrics(gt_dir, pred_dir, accelerator.device)
+        logger.info(f"Full Validation Metrics for Epoch {epoch}: {metrics}")
+        log_line = f"{epoch},{lr},{train_loss},{valid_loss},{metrics['psnr']},{metrics['ssim']},{metrics['lpips']},{metrics['mse']},{metrics['fid']}\n"
+        out_f.write(log_line)
+        out_f.flush()
+
 
 
 def tensor_to_image(tensor, save_path):
@@ -853,6 +1002,9 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
             examples["warped_image"] = [
                 Image.fromarray((np.zeros((args.resolution, args.resolution, 3))).astype(np.uint8)) for _ in
                 range(len(conditioning_images))]
+        
+        examples["prompts"] = [examples[caption_column][i] for i in range(len(conditioning_images))]
+        examples["filenames"] = [os.path.basename(examples["image"][idx].filename) for idx in range(len(conditioning_images))]
 
         return examples
 
@@ -876,6 +1028,8 @@ def collate_fn(examples):
     warped_image = torch.stack([example["warped_pixel_values"] for example in examples])
     input_ids = torch.stack([example["input_ids"] for example in examples])
     binary_label = torch.stack([example["binary_label"] for example in examples])
+    prompts = [example["prompts"] for example in examples]
+    filenames = [example["filenames"] for example in examples]
 
     return {
         "pixel_values": pixel_values,
@@ -884,6 +1038,8 @@ def collate_fn(examples):
         "optical_flow": optical_flow_values,
         "warped_pixel_values": warped_image,
         "binary_label": binary_label,
+        "prompts": prompts,
+        "filenames": filenames,
     }
 
 
@@ -1018,6 +1174,8 @@ def main(args):
     controlnet.train()
     out_log = os.path.join(args.output_dir, "log.txt")
     out_f = open(out_log, "w")
+    out_f.write("epoch,lr,train_loss,valid_loss,psnr,ssim,lpips,mse,fid\n")
+    out_f.flush()
 
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -1201,56 +1359,8 @@ def main(args):
         disable=not accelerator.is_local_main_process,
     )
 
-    if accelerator.is_main_process:
-        sample_imgs, sample_prompts, sample_targets, sample_flows, sample_warp_images = get_vis_sample(
-            validation_dataset, resolution=args.resolution)
-        vis_imgs = visualize(
-            sample_prompts,
-            sample_imgs,
-            sample_flows,
-            sample_warp_images,
-            vae,
-            text_encoder,
-            tokenizer,
-            unet,
-            controlnet,
-            args,
-            accelerator,
-            weight_dtype,
-            flow_normalize_factor=args.of_norm_factor
-        )
-        vis_dir = os.path.join(args.output_dir, "visualize/epoch-{}".format(0))
-        os.makedirs(vis_dir, exist_ok=True)
-        for idx, (vis_log, vis_target) in enumerate(zip(vis_imgs, sample_targets)):
-            images = vis_log["images"]
-            validation_prompt = vis_log["validation_prompt"]
-            validation_image = vis_log["validation_image"]
-            # Convert to RGB
-            validation_image = np.asarray(validation_image.convert("RGB"))
-            validation_target = np.asarray(vis_target.convert("RGB"))
-
-            # validation_image = resize_and_center_crop(vis_log["validation_image"], (args.resolution, args.resolution))
-            formatted_images = [validation_target, validation_image]
-            for image in images:
-                formatted_images.append(np.asarray(image))
-            # Concat the images horizontally
-            concat_image = np.concatenate(formatted_images, axis=1)
-            # Write prompt in a new white image
-            prompt_image = np.ones((100, concat_image.shape[1], 3), dtype=np.uint8) * 255
-            cv2.putText(
-                prompt_image,
-                validation_prompt,
-                (10, 50),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                2,
-                (0, 0, 0),
-                2,
-                cv2.LINE_AA,
-            )
-            # Concat the prompt image with the generated images
-            concat_image = np.concatenate([prompt_image, concat_image], axis=0)
-            image_name = os.path.join(vis_dir, "{}_{}.png".format(idx, validation_prompt))
-            cv2.imwrite(image_name, concat_image)
+    run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, 0)
+    run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, 0, out_f, train_loss=0.0, valid_loss=0.0, lr=args.learning_rate)
 
     for epoch in range(first_epoch, args.num_train_epochs):
         train_loss, val_loss = 0, 0
@@ -1485,54 +1595,9 @@ def main(args):
         out_f.write(f"Valid: Epoch {epoch} average loss: {avg_val_loss}\n")
         out_f.flush()
 
-        if accelerator.is_main_process:
-            sample_imgs, sample_prompts, sample_targets, sample_flows, sample_warp_images = get_vis_sample(
-                validation_dataset, resolution=args.resolution)
-            vis_imgs = visualize(
-                sample_prompts,
-                sample_imgs,
-                sample_flows,
-                sample_warp_images,
-                vae,
-                text_encoder,
-                tokenizer,
-                unet,
-                controlnet,
-                args,
-                accelerator,
-                weight_dtype,
-                flow_normalize_factor=args.of_norm_factor
-            )
-            vis_dir = os.path.join(args.output_dir, "visualize/epoch-{}".format(epoch + 1))
-            os.makedirs(vis_dir, exist_ok=True)
-            for idx, (vis_log, vis_target) in enumerate(zip(vis_imgs, sample_targets)):
-                images = vis_log["images"]
-                validation_prompt = vis_log["validation_prompt"]
-                validation_image = vis_log["validation_image"]
-                validation_image = np.asarray(validation_image.convert("RGB"))
-                validation_target = np.asarray(vis_target.convert("RGB"))
-
-                # validation_image = resize_and_center_crop(vis_log["validation_image"], (args.resolution, args.resolution))
-                formatted_images = [validation_target, validation_image]
-                for image in images:
-                    formatted_images.append(np.asarray(image))
-                # Concat the images horizontally
-                concat_image = np.concatenate(formatted_images, axis=1)
-                prompt_image = np.ones((100, concat_image.shape[1], 3), dtype=np.uint8) * 255
-                cv2.putText(
-                    prompt_image,
-                    validation_prompt,
-                    (10, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    2,
-                    (0, 0, 0),
-                    2,
-                    cv2.LINE_AA,
-                )
-                # Concat the prompt image with the generated images
-                concat_image = np.concatenate([prompt_image, concat_image], axis=0)
-                image_name = os.path.join(vis_dir, "{}_{}.png".format(idx, validation_prompt))
-                cv2.imwrite(image_name, concat_image)
+    if accelerator.is_main_process:
+        run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, epoch + 1, out_f)
+        run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, epoch + 1)
 
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
