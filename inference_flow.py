@@ -16,7 +16,7 @@ from RAFT.utils.utils import InputPadder
 DEVICE = 'cuda'
 
 
-def visualize_optical_flow(flow, frame):
+def visualize_flow_lines(flow, frame):
     """Generates a visualization of the optical flow field."""
     h, w = frame.shape[:2]
     step = 16
@@ -31,7 +31,7 @@ def visualize_optical_flow(flow, frame):
     vis = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
     return vis
 
-def flow_to_image(flow, max_flow=10.0):
+def visualize_flow_colors(flow, max_flow=10.0):
     """
     将光流数据转换为可视化图像（颜色过渡更平滑）
 
@@ -95,7 +95,7 @@ def merge_images(input_folders, output_folder, notes, colors):
             if img is None:
                 print(f"Error: Could not read image {image_path}")
                 return  # Exit if any image fails to load
-            # img = add_label(img, notes[j], colors[j])
+            img = add_label(img, notes[j], colors[j])
             images.append(img)
 
         # Ensure all images have the same shape as the first image
@@ -104,9 +104,12 @@ def merge_images(input_folders, output_folder, notes, colors):
             images[k] = cv2.resize(images[k], (width, height))
 
         # Create the 2x2 merged image
-        # top_row = np.hstack(])
-        merged_image = np.vstack([images[0], images[1], images[2]])
-        # merged_image = np.vstack([top_row, bottom_row])
+        if len(images) == 4:
+            top_row = np.hstack([images[0], images[1]])
+            bottom_row = np.hstack([images[2], images[3]])
+            merged_image = np.vstack([top_row, bottom_row])
+        else:
+            merged_image = np.hstack(images)
 
         base_file_name = os.path.splitext(image_files[0][i])[0]
         # Save the merged image
@@ -148,7 +151,7 @@ def warp_image(image, flow):
     warped = cv2.remap(img, map_x, map_y, interpolation=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0))
     return warped
 
-def demo(args, original_image_folder, flow_folder, warped_image_folder, frame_folder, scale=1.0):
+def demo(args, original_image_folder, flow_folder, warped_image_folder, frame_folder, flow_lines_folder, flow_colors_folder, scale=1.0):
 
     model = torch.nn.DataParallel(RAFT(args))
     model.load_state_dict(torch.load(args.model))
@@ -181,6 +184,18 @@ def demo(args, original_image_folder, flow_folder, warped_image_folder, frame_fo
             base_name = os.path.splitext(os.path.basename(imfile))[0]
             flow_img_path = os.path.join(flow_folder, f'{base_name}.png')
             cv2.imwrite(flow_img_path, flow_16bit.astype(np.uint16))
+            
+            # Generate visualizations
+            # 1. Flow Lines
+            image1_np = image1[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+            image1_bgr = cv2.cvtColor(image1_np, cv2.COLOR_RGB2BGR)
+            vis_lines = visualize_flow_lines(flow_01, image1_bgr)
+            cv2.imwrite(os.path.join(flow_lines_folder, f'{base_name}.png'), vis_lines)
+            
+            # 2. Flow Colors
+            vis_colors = visualize_flow_colors(flow_01)
+            cv2.imwrite(os.path.join(flow_colors_folder, f'{base_name}.png'), vis_colors)
+
             flow_up_unpad = flow_up_unpad * scale  # Scale the flow
 
             # Warp image1 to synthesize image2
@@ -212,14 +227,20 @@ if __name__ == '__main__':
     flow_root = os.path.join(output_root, 'flow')
     warped_image_root = os.path.join(output_root, 'warped')
     frame_root = os.path.join(output_root, 'frame')
-    colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0)]
-    notes = ["first frame", "warped", "optical"]
+    flow_lines_root = os.path.join(output_root, 'flow_lines')
+    flow_colors_root = os.path.join(output_root, 'flow_colors')
+
+    colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
+    notes = ["first frame", "warped", "flow lines", "flow colors"]
 
 
     os.makedirs(flow_root, exist_ok=True)
     os.makedirs(warped_image_root, exist_ok=True)
     os.makedirs(frame_root, exist_ok=True)
-    demo(args, original_image_root, flow_root, warped_image_root, frame_root, scale=1.0)
+    os.makedirs(flow_lines_root, exist_ok=True)
+    os.makedirs(flow_colors_root, exist_ok=True)
+
+    demo(args, original_image_root, flow_root, warped_image_root, frame_root, flow_lines_root, flow_colors_root, scale=1.0)
     out_merged_path = os.path.join(output_root, 'merged')
-    inp_folders = [frame_root, warped_image_root, flow_root]
+    inp_folders = [frame_root, warped_image_root, flow_lines_root, flow_colors_root]
     merge_images(inp_folders, out_merged_path, notes, colors)

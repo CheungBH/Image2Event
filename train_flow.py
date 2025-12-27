@@ -97,22 +97,42 @@ def fetch_optimizer(args, model):
     
 
 class Logger:
-    def __init__(self, model, scheduler):
+    def __init__(self, model, scheduler, log_dir=None):
         self.model = model
         self.scheduler = scheduler
         self.total_steps = 0
         self.running_loss = {}
+        self.log_dir = log_dir
+        if self.log_dir:
+            self.log_file = os.path.join(self.log_dir, 'training_log.csv')
+            if not os.path.exists(self.log_file):
+                 with open(self.log_file, 'w') as f:
+                     # Will write header later when we know the keys
+                     pass
+        else:
+             self.log_file = None
 
     def _print_training_status(self):
-        metrics_data = [self.running_loss[k]/SUM_FREQ for k in sorted(self.running_loss.keys())]
+        sorted_keys = sorted(self.running_loss.keys())
+        metrics_data = [self.running_loss[k]/SUM_FREQ for k in sorted_keys]
         training_str = "[{:6d}, {:10.7f}] ".format(self.total_steps+1, self.scheduler.get_last_lr()[0])
         metrics_str = ("{:10.4f}, "*len(metrics_data)).format(*metrics_data)
         
         # print the training status
         if self.total_steps + 1 <= SUM_FREQ:
-             print(f"Step, LR, {', '.join(sorted(self.running_loss.keys()))}")
+             header_str = f"Step, LR, {', '.join(sorted_keys)}"
+             print(header_str)
+             if self.log_file:
+                 with open(self.log_file, 'a') as f:
+                     if os.stat(self.log_file).st_size == 0:
+                         f.write(header_str + '\n')
 
         print(training_str + metrics_str)
+
+        if self.log_file:
+            with open(self.log_file, 'a') as f:
+                log_line = f"{self.total_steps+1}, {self.scheduler.get_last_lr()[0]:.7f}, {', '.join(['{:.4f}'.format(x) for x in metrics_data])}"
+                f.write(log_line + '\n')
 
         for k in self.running_loss:
             self.running_loss[k] = 0.0
