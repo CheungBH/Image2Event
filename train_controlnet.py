@@ -802,44 +802,24 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
 
-    if args.train_dataset_name is not None:
-        if phase == "train":
-            # Downloading and loading a dataset from the hub.
+    if phase == "train":
+        if args.train_data_dir is not None:
             dataset = load_dataset(
-                args.train_dataset_name,
-                args.dataset_config_name,
-                cache_dir=args.cache_dir,
-                data_dir=args.train_data_dir,
-                trust_remote_code=True
-            )
-        else:
-            dataset = load_dataset(
-                args.validation_dataset_name,
+                os.path.join(args.train_data_dir, "dataset_script.py"),
                 args.dataset_config_name,
                 cache_dir=args.cache_dir,
                 data_dir=args.train_data_dir,
                 trust_remote_code=True
             )
     else:
-        if phase == "train":
-            if args.train_data_dir is not None:
-                dataset = load_dataset(
-                    os.path.join(args.train_data_dir, "dataset_script.py"),
-                    args.dataset_config_name,
-                    cache_dir=args.cache_dir,
-                    data_dir=args.train_data_dir,
-                    trust_remote_code=True
-                )
-
-        else:
-            if args.validation_data_dir is not None:
-                dataset = load_dataset(
-                    os.path.join(args.validation_data_dir, "dataset_script.py"),
-                    args.dataset_config_name,
-                    cache_dir=args.cache_dir,
-                    data_dir=args.validation_data_dir,
-                    trust_remote_code=True
-                )
+        if args.validation_data_dir is not None:
+            dataset = load_dataset(
+                os.path.join(args.validation_data_dir, "dataset_script.py"),
+                args.dataset_config_name,
+                cache_dir=args.cache_dir,
+                data_dir=args.validation_data_dir,
+                trust_remote_code=True
+            )
 
         # See more about loading custom images at
         # https://huggingface.co/docs/datasets/v2.0.0/en/dataset_script
@@ -1347,8 +1327,8 @@ def main(args):
         disable=not accelerator.is_local_main_process,
     )
 
-    run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, 0)
-    run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, 0, out_f, train_loss=0.0, valid_loss=0.0, lr=args.learning_rate)
+    run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, 9999)
+    run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, 9999, out_f, train_loss=0.0, valid_loss=0.0, lr=args.learning_rate)
 
     for epoch in range(first_epoch, args.num_train_epochs):
         train_loss, val_loss = 0, 0
@@ -1494,10 +1474,10 @@ def main(args):
                 break
 
         avg_loss = train_loss / num_update_steps_per_epoch
-        out_f.write("----------------------------------------\n")
+        # out_f.write("----------------------------------------\n")
         logger.info(f"Train: Epoch {epoch} average loss: {avg_loss}")
-        out_f.write(f"Train: Epoch {epoch} average loss: {avg_loss}\n")
-        out_f.flush()
+        # out_f.write(f"Train: Epoch {epoch} average loss: {avg_loss}\n")
+        # out_f.flush()
 
         for step, batch in enumerate(validation_dataloader):
             with torch.no_grad():
@@ -1580,12 +1560,12 @@ def main(args):
         avg_val_loss = val_loss / len(validation_dataloader)
 
         logger.info(f"Valid: Epoch {epoch} average loss: {avg_val_loss}")
-        out_f.write(f"Valid: Epoch {epoch} average loss: {avg_val_loss}\n")
-        out_f.flush()
+        # out_f.write(f"Valid: Epoch {epoch} average loss: {avg_val_loss}\n")
+        # out_f.flush()
 
-    if accelerator.is_main_process:
-        run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, epoch + 1, out_f)
-        run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, epoch + 1)
+        if accelerator.is_main_process:
+            run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, epoch, out_f, train_loss=avg_loss, valid_loss=avg_val_loss, lr=lr_scheduler.get_last_lr()[0])
+            run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, epoch)
 
     # Create the pipeline using using the trained modules and save it.
     accelerator.wait_for_everyone()
