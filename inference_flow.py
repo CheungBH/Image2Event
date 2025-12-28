@@ -1,3 +1,4 @@
+# python
 import sys
 
 import argparse
@@ -34,13 +35,6 @@ def visualize_flow_lines(flow, frame):
 def visualize_flow_colors(flow, max_flow=10.0):
     """
     将光流数据转换为可视化图像（颜色过渡更平滑）
-
-    参数:
-        flow (np.ndarray): 光流数据，形状 (H, W, 2)
-        max_flow (float): 最大光流值，用于归一化（默认10.0）
-
-    返回:
-        np.ndarray: BGR 格式的可视化图像
     """
     magnitude, angle = cv2.cartToPolar(flow[..., 0], flow[..., 1], angleInDegrees=True)
     magnitude = np.clip(magnitude / max_flow, 0, 1)
@@ -61,20 +55,31 @@ def add_label(image, label, color):
     return img
 
 
-def merge_images(input_folders, output_folder, notes, colors):
+def merge_images(input_folders, output_folder, notes, colors, temporal_score_path=None):
     """
     Merges images from multiple input folders into a single output folder,
-    creating a 2x2 merged image for each set of four images
-    (one from each input folder).
-
-    Args:
-        input_folders: A list of paths toad the four input folders.
-        output_folder: The path to the output folder where merged images will be saved.
+    creating a 2x2 merged image for each set of four images.
+    If temporal_score_path is provided, the first-note for each merged image
+    will be replaced by the corresponding score read from that file.
     """
 
-    # Create the output directory if it doesn't exist
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
+
+    # Load temporal scores if available (format: name,score)
+    scores_map = {}
+    if temporal_score_path and os.path.exists(temporal_score_path):
+        try:
+            with open(temporal_score_path, 'r') as sf:
+                for line in sf:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if ',' in line:
+                        name, score = line.split(',', 1)
+                        scores_map[name] = score
+        except Exception:
+            scores_map = {}
 
     # Get the list of image files from each input folder
     image_files = []
@@ -82,11 +87,9 @@ def merge_images(input_folders, output_folder, notes, colors):
         img_files = sorted([f for f in os.listdir(folder) if f.endswith(('.png', '.jpg', '.jpeg'))])
         image_files.append(img_files)
 
-    # Determine the number of sets of images we can create
     num_sets = min(len(files) for files in image_files)
 
     for i in range(num_sets):
-        # Read the i-th image from each folder
         images = []
         for j, folder in enumerate(input_folders):
             image_path = os.path.join(folder, image_files[j][i])
@@ -94,16 +97,19 @@ def merge_images(input_folders, output_folder, notes, colors):
 
             if img is None:
                 print(f"Error: Could not read image {image_path}")
-                return  # Exit if any image fails to load
-            img = add_label(img, notes[j], colors[j])
+                return
+            # Prepare per-image notes (replace first note with score if available)
+            base_name = os.path.splitext(image_files[0][i])[0]
+            notes_local = notes.copy()
+            if scores_map.get(base_name) is not None:
+                notes_local[0] = f"score: {scores_map[base_name]}"
+            img = add_label(img, notes_local[j], colors[j])
             images.append(img)
 
-        # Ensure all images have the same shape as the first image
         height, width, channels = images[0].shape
         for k in range(1, len(images)):
             images[k] = cv2.resize(images[k], (width, height))
 
-        # Create the 2x2 merged image
         if len(images) == 4:
             top_row = np.hstack([images[0], images[1]])
             bottom_row = np.hstack([images[2], images[3]])
@@ -112,14 +118,11 @@ def merge_images(input_folders, output_folder, notes, colors):
             merged_image = np.hstack(images)
 
         base_file_name = os.path.splitext(image_files[0][i])[0]
-        # Save the merged image
         output_path = os.path.join(output_folder, f"{base_file_name}.png")
         cv2.imwrite(output_path, merged_image)
         print(f"Merged image saved to {output_path}")
         cv2.imshow("Merged image", merged_image)
         cv2.waitKey(1)
-
-
 
 
 def load_image(imfile):
@@ -151,7 +154,70 @@ def warp_image(image, flow):
     warped = cv2.remap(img, map_x, map_y, interpolation=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0))
     return warped
 
-def demo(args, original_image_folder, flow_folder, warped_image_folder, frame_folder, flow_lines_folder, flow_colors_folder, scale=1.0):
+def calculate_diffusion_score(optical_flow):
+    """
+    Compute a diffusion score in [0,1] for a given optical flow array (H,W,2).
+    Score combines radial alignment with flow magnitude and ignores very small flow.
+    """
+    if optical_flow is None or optical_flow.size == 0:
+        return 0.0
+
+    H, W = optical_flow.shape[:2]
+
+    # Compute magnitudes
+    mag_flow = np.sqrt(optical_flow[..., 0] ** 2 + optical_flow[..., 1] ** 2)
+    if np.all(mag_flow == 0):
+        return 0.0
+
+    # Estimate center as image center (simpler and stable)
+    center_x, center_y = W // 2, H // 2
+
+    # Radial vectors
+    y_coords, x_coords = np.mgrid[0:H, 0:W]
+    dx_radial = x_coords - center_x
+    dy_radial = y_coords - center_y
+    mag_radial = np.sqrt(dx_radial ** 2 + dy_radial ** 2)
+    mag_radial[mag_radial == 0] = 1.0
+    dx_radial_norm = dx_radial / mag_radial
+    dy_radial_norm = dy_radial / mag_radial
+
+    # Normalize flow directions
+    mag_flow_temp = mag_flow.copy()
+    mag_flow_temp[mag_flow_temp == 0] = 1.0
+    dx_flow_norm = optical_flow[..., 0] / mag_flow_temp
+    dy_flow_norm = optical_flow[..., 1] / mag_flow_temp
+
+    # Direction similarity (cosine) -> convert to angle difference
+    dot = dx_flow_norm * dx_radial_norm + dy_flow_norm * dy_radial_norm
+    dot = np.clip(dot, -1.0, 1.0)
+    angle_diff = np.arccos(dot)
+
+    max_angle = np.pi / 6.0  # 30 degrees tolerance
+    direction_consistency = np.maximum(0.0, 1.0 - angle_diff / max_angle)
+
+    # Normalize magnitude relative to median of positive flows
+    positive_mags = mag_flow[mag_flow > 0]
+    if positive_mags.size == 0:
+        mag_norm = np.zeros_like(mag_flow)
+    else:
+        med = np.median(positive_mags)
+        mag_norm = mag_flow / (med + 1e-8)
+        mag_norm = np.clip(mag_norm, 0.0, 5.0)
+
+    combined = direction_consistency * mag_norm
+
+    # Consider valid region to avoid very small flows
+    valid_mask = mag_flow > np.percentile(mag_flow, 10)
+    if np.any(valid_mask):
+        final = np.mean(combined[valid_mask])
+    else:
+        final = np.mean(combined)
+
+    final = float(np.clip(final, 0.0, 1.0))
+    return final
+
+
+def demo(args, original_image_folder, flow_folder, warped_image_folder, frame_folder, flow_lines_folder, flow_colors_folder, scale=1.0, temporal_score_path=None):
 
     model = torch.nn.DataParallel(RAFT(args))
     model.load_state_dict(torch.load(args.model))
@@ -159,56 +225,75 @@ def demo(args, original_image_folder, flow_folder, warped_image_folder, frame_fo
     model.to(DEVICE)
     model.eval()
 
-    with torch.no_grad():
-        images = glob.glob(os.path.join(original_image_folder, '*.png')) + \
-                 glob.glob(os.path.join(original_image_folder, '*.jpg'))
-        images = sorted(images)
-        for imfile in tqdm.tqdm(images):
-            image1 = load_image(imfile)
-            image2 = load_image(imfile)
+    # Open temporal score file for writing (overwrite)
+    if temporal_score_path:
+        os.makedirs(os.path.dirname(temporal_score_path), exist_ok=True)
+        scores_file = open(temporal_score_path, 'w')
+        scores_file.write("name,score\n")
+    else:
+        scores_file = None
+
+    try:
+        with torch.no_grad():
+            images = glob.glob(os.path.join(original_image_folder, '*.png')) + \
+                     glob.glob(os.path.join(original_image_folder, '*.jpg'))
+            images = sorted(images)
+            for imfile in tqdm.tqdm(images):
+                image1 = load_image(imfile)
+                image2 = load_image(imfile)
 
 
-            padder = InputPadder(image1.shape)
-            image1_pad, image2_pad = padder.pad(image1, image2)
+                padder = InputPadder(image1.shape)
+                image1_pad, image2_pad = padder.pad(image1, image2)
 
-            flow_low, flow_up = model(image1_pad, image2_pad, iters=20, test_mode=True)
+                flow_low, flow_up = model(image1_pad, image2_pad, iters=20, test_mode=True)
 
-            # Unpad flow to original size
-            flow_up_unpad = padder.unpad(flow_up)
+                # Unpad flow to original size
+                flow_up_unpad = padder.unpad(flow_up)
 
-            flow_01 = flow_up_unpad[0].permute(1, 2, 0).cpu().numpy()  # [H, W, 2]
-            flow_16bit = cv2.cvtColor(
-                np.concatenate((flow_01 * 64. + (2 ** 15), np.ones_like(flow_01)[:, :, 0:1]), -1),
-                cv2.COLOR_BGR2RGB
-            )
-            base_name = os.path.splitext(os.path.basename(imfile))[0]
-            flow_img_path = os.path.join(flow_folder, f'{base_name}.png')
-            cv2.imwrite(flow_img_path, flow_16bit.astype(np.uint16))
-            
-            # Generate visualizations
-            # 1. Flow Lines
-            image1_np = image1[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
-            image1_bgr = cv2.cvtColor(image1_np, cv2.COLOR_RGB2BGR)
-            vis_lines = visualize_flow_lines(flow_01, image1_bgr)
-            cv2.imwrite(os.path.join(flow_lines_folder, f'{base_name}.png'), vis_lines)
-            
-            # 2. Flow Colors
-            vis_colors = visualize_flow_colors(flow_01)
-            cv2.imwrite(os.path.join(flow_colors_folder, f'{base_name}.png'), vis_colors)
+                flow_01 = flow_up_unpad[0].permute(1, 2, 0).cpu().numpy()  # [H, W, 2]
+                flow_16bit = cv2.cvtColor(
+                    np.concatenate((flow_01 * 64. + (2 ** 15), np.ones_like(flow_01)[:, :, 0:1]), -1),
+                    cv2.COLOR_BGR2RGB
+                )
+                base_name = os.path.splitext(os.path.basename(imfile))[0]
+                flow_img_path = os.path.join(flow_folder, f'{base_name}.png')
+                cv2.imwrite(flow_img_path, flow_16bit.astype(np.uint16))
 
-            flow_up_unpad = flow_up_unpad * scale  # Scale the flow
+                # Generate visualizations
+                # 1. Flow Lines
+                image1_np = image1[0].permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                image1_bgr = cv2.cvtColor(image1_np, cv2.COLOR_RGB2BGR)
+                vis_lines = visualize_flow_lines(flow_01, image1_bgr)
+                cv2.imwrite(os.path.join(flow_lines_folder, f'{base_name}.png'), vis_lines)
 
-            # Warp image1 to synthesize image2
-            warped = warp_image(image1, flow_up_unpad)
+                # 2. Flow Colors
+                vis_colors = visualize_flow_colors(flow_01)
+                cv2.imwrite(os.path.join(flow_colors_folder, f'{base_name}.png'), vis_colors)
 
-            # Use original image1 name (without extension) for saving
-            base_name = os.path.splitext(os.path.basename(imfile))[0]
-            warped_path = os.path.join(warped_image_folder, f'{base_name}.png')
-            flow_path = os.path.join(flow_folder, f'{base_name}.npy')
+                flow_up_unpad = flow_up_unpad * scale  # Scale the flow
 
-            cv2.imwrite(warped_path, cv2.cvtColor(warped, cv2.COLOR_RGB2BGR))
-            np.save(flow_path, flow_up_unpad[0].permute(1, 2, 0).cpu().numpy())
-            save_image(image1, os.path.join(frame_folder, f'{base_name}.png'))
+                # Warp image1 to synthesize image2
+                warped = warp_image(image1, flow_up_unpad)
+
+                base_name = os.path.splitext(os.path.basename(imfile))[0]
+                warped_path = os.path.join(warped_image_folder, f'{base_name}.png')
+                flow_path = os.path.join(flow_folder, f'{base_name}.npy')
+
+                cv2.imwrite(warped_path, cv2.cvtColor(warped, cv2.COLOR_RGB2BGR))
+                flow_np = flow_up_unpad[0].permute(1, 2, 0).cpu().numpy()
+                np.save(flow_path, flow_np)
+                save_image(image1, os.path.join(frame_folder, f'{base_name}.png'))
+
+                # Calculate diffusion score and write to temporal score file
+                score = calculate_diffusion_score(flow_np)
+                if scores_file:
+                    scores_file.write(f"{base_name},{score:.4f}\n")
+
+    finally:
+        if scores_file:
+            scores_file.close()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -233,14 +318,14 @@ if __name__ == '__main__':
     colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (0, 255, 255)]
     notes = ["first frame", "warped", "flow lines", "flow colors"]
 
-
     os.makedirs(flow_root, exist_ok=True)
     os.makedirs(warped_image_root, exist_ok=True)
     os.makedirs(frame_root, exist_ok=True)
     os.makedirs(flow_lines_root, exist_ok=True)
     os.makedirs(flow_colors_root, exist_ok=True)
 
-    demo(args, original_image_root, flow_root, warped_image_root, frame_root, flow_lines_root, flow_colors_root, scale=1.0)
+    temporal_score_path = os.path.join(output_root, 'temporal_score.txt')
+    demo(args, original_image_root, flow_root, warped_image_root, frame_root, flow_lines_root, flow_colors_root, scale=1.0, temporal_score_path=temporal_score_path)
     out_merged_path = os.path.join(output_root, 'merged')
     inp_folders = [frame_root, warped_image_root, flow_lines_root, flow_colors_root]
-    merge_images(inp_folders, out_merged_path, notes, colors)
+    merge_images(inp_folders, out_merged_path, notes, colors, temporal_score_path=temporal_score_path)
