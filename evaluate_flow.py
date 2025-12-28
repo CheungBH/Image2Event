@@ -49,6 +49,7 @@ def create_kitti_submission(model, iters=24, output_path='kitti_submission'):
 def validate_dsec(model, root, split, iters=24):
     """ Perform validation using the DSEC_RAFT dataset """
     model.eval()
+    split = 'test' if split == 'test' else 'train'
     val_dataset = datasets.DSECRAFT(root=root, split=split)
 
     out_list, epe_list, angle_list = [], [], []
@@ -101,6 +102,8 @@ def validate_dsec(model, root, split, iters=24):
 def validate_kitti(model, root, split, iters=24):
     """ Peform validation using the KITTI-2015 (train) split """
     model.eval()
+    split = 'testing' if split == 'test' else 'training'
+
     val_dataset = datasets.KITTI(split=split, root=root, aug_params=None)
 
     out_list, epe_list, angle_list = [], [], []
