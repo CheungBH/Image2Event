@@ -1,7 +1,7 @@
 import copy
 import sys
 sys.path.append('core')
-
+import tqdm
 from PIL import Image
 import argparse
 import os
@@ -46,13 +46,13 @@ def create_kitti_submission(model, iters=24, output_path='kitti_submission'):
 
 
 @torch.no_grad()
-def validate_dsec(model, iters=24):
+def validate_dsec(model, root, split, iters=24):
     """ Perform validation using the DSEC_RAFT dataset """
     model.eval()
-    val_dataset = datasets.DSECRAFT(split='train')
+    val_dataset = datasets.DSECRAFT(root=root, split=split)
 
     out_list, epe_list, angle_list = [], [], []
-    for val_id in range(len(val_dataset)):
+    for val_id in tqdm.tqdm(range(len(val_dataset))):
         image1, image2, flow_gt, valid_gt = val_dataset[val_id]
         image1 = image1[None].cuda()
         image2 = image2[None].cuda()
@@ -98,13 +98,13 @@ def validate_dsec(model, iters=24):
 
 
 @torch.no_grad()
-def validate_kitti(model, iters=24):
+def validate_kitti(model, root, split, iters=24):
     """ Peform validation using the KITTI-2015 (train) split """
     model.eval()
-    val_dataset = datasets.KITTI(split='training')
+    val_dataset = datasets.KITTI(split=split, root=root, aug_params=None)
 
     out_list, epe_list, angle_list = [], [], []
-    for val_id in range(len(val_dataset)):
+    for val_id in tqdm.tqdm(range(len(val_dataset))):
         image1, image2, flow_gt, valid_gt = val_dataset[val_id]
         image1 = image1[None].cuda()
         image2 = copy.deepcopy(image1)
@@ -162,6 +162,8 @@ if __name__ == '__main__':
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
     parser.add_argument('--alternate_corr', action='store_true', help='use efficent correlation implementation')
+    parser.add_argument('--dataset_root', type=str, help='path to dataset', default='datasets/DSEC-Flow')
+    parser.add_argument('--phase', type=str, help='train/test', default='test')
     args = parser.parse_args()
 
     model = torch.nn.DataParallel(RAFT(args))
@@ -175,8 +177,9 @@ if __name__ == '__main__':
              create_kitti_submission(model.module)
         else:
              with torch.no_grad():
-                validate_kitti(model.module, split='training')
+                validate_kitti(model.module, root=args.dataset_root, split='training')
     elif args.dataset == 'DSEC_RAFT':
-        dsec_root = getattr(settings, 'dsec_root', args.dataset_root)
         with torch.no_grad():
-            validate_dsec(model.module, root=dsec_root, split=args.phase)
+            validate_dsec(model.module, root=args.dataset_root, split=args.phase)
+    else:
+        raise ValueError('Unknown dataset')

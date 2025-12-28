@@ -1,12 +1,6 @@
 import os
 import json
 
-# root_folder = "/Volumes/ASSETS/tmp/4.15/results/candidates_output"
-# output_folder = "/Volumes/ASSETS/tmp/4.15/results/candidates_output/merged"
-# out_events_folder = os.path.join(output_folder, "images")
-# out_rgb_folder = os.path.join(output_folder, "conditioning_images")
-
-
 def create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_folder, event_targets=["Accumulate.png"]):
     for folder in os.listdir(root_folder):
         folder_path = os.path.join(root_folder, folder)
@@ -27,7 +21,7 @@ def create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_fold
 
 def generate_metadata(base_dir, event_metas):
 
-    event_names, prompts = event_metas
+    event_names = event_metas
     images_dir = os.path.join(base_dir, "images")
     cond_dir = os.path.join(base_dir, "conditioning_images")
     optical_flows_dir = os.path.join(base_dir, "optical_flow")
@@ -60,10 +54,9 @@ def generate_metadata(base_dir, event_metas):
 
 
 if __name__ == '__main__':
-    root_folder = "data/DSEC_dataset/test"
-    output_folder = "data/RAFT_flow_dataset/test"
+    root_folder = "data/DSEC_dataset/train"
+    output_folder = "data/RAFT_flow_dataset/train"
     event_targets = ["event.png"]
-    event_prompts = ["Accumulation going forward"]
 
     def remove_all_DS_Store(path):
         for root, dirs, files in os.walk(path):
@@ -79,5 +72,5 @@ if __name__ == '__main__':
     os.makedirs(out_events_folder, exist_ok=True)
     os.makedirs(out_flow_folder, exist_ok=True)
     create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_folder, event_targets=event_targets)
-    generate_metadata(output_folder, event_metas=[event_targets, event_prompts])
+    generate_metadata(output_folder, event_metas=[event_targets])
     os.system("cp dataset_script.py {}".format(output_folder))
