@@ -57,24 +57,6 @@ class EventDataset(GeneratorBasedBuilder):
             )
         ]
 
-    # def _split_generators(self, dl_manager):
-    #     return [
-    #         SplitGenerator(
-    #             name=Split.TRAIN,
-    #             gen_kwargs={
-    #                 "metadata_path": Path(self.config.data_dir) / "metadata.jsonl",
-    #                 "base_dir": Path(self.config.data_dir)
-    #             },
-    #         ),
-        #     SplitGenerator(
-        #         name=Split.VALIDATION,
-        #         gen_kwargs={
-        #             "metadata_path": Path(self.config.data_dir) / "validation.jsonl",
-        #             "base_dir": Path(self.config.data_dir)
-        #         },
-        #     )
-        #   ]
-
     def _generate_examples(self, metadata_path, base_dir):
         """Yields examples as (key, example) tuples."""
         try:
@@ -86,10 +68,6 @@ class EventDataset(GeneratorBasedBuilder):
                     img_path = base_dir / data["image"]
                     cond_path = base_dir / data["conditioning_image"]
                     oflow_path = base_dir / data["optical_flow"]
-                    if not img_path.exists():
-                        raise FileNotFoundError(f"Missing image: {img_path}")
-                    if not cond_path.exists():
-                        raise FileNotFoundError(f"Missing conditioning image: {cond_path}")
 
                     yield idx, {
                         "text": data["text"],

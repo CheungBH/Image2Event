@@ -21,7 +21,7 @@ def create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_fold
 
 def generate_metadata(base_dir, event_metas):
 
-    event_names = event_metas
+    event_names = event_metas[0]
     images_dir = os.path.join(base_dir, "images")
     cond_dir = os.path.join(base_dir, "conditioning_images")
     optical_flows_dir = os.path.join(base_dir, "optical_flow")
@@ -42,7 +42,7 @@ def generate_metadata(base_dir, event_metas):
                 "text": prompt,
                 "image": "/".join(image_file.split("/")[-2:]),
                 "conditioning_image": "/".join(cond_files[-1].split("/")[-2:]),
-                "optical_flow": os.path.join(optical_flows_dir.split("/")[-1], f"{base_name}-flow_up.npy").replace("\\", "/"),
+                "optical_flow": os.path.join(optical_flows_dir.split("/")[-1], f"{base_name}-flow.npy").replace("\\", "/"),
             })
 
 
@@ -54,8 +54,9 @@ def generate_metadata(base_dir, event_metas):
 
 
 if __name__ == '__main__':
-    root_folder = "data/DSEC_dataset/train"
-    output_folder = "data/RAFT_flow_dataset/train"
+    phases = ["train", "test"]
+    root_folder_src = "data/DSEC_dataset"
+    output_folder_src = "data/RAFT_flow_dataset"
     event_targets = ["event.png"]
 
     def remove_all_DS_Store(path):
@@ -63,14 +64,16 @@ if __name__ == '__main__':
             for file in files:
                 if file.startswith('.'):
                     os.remove(os.path.join(root, file))
-    remove_all_DS_Store(root_folder)
-
-    out_events_folder = os.path.join(output_folder, "images")
-    out_rgb_folder = os.path.join(output_folder, "conditioning_images")
-    out_flow_folder = os.path.join(output_folder, "optical_flow")
-    os.makedirs(out_rgb_folder, exist_ok=True)
-    os.makedirs(out_events_folder, exist_ok=True)
-    os.makedirs(out_flow_folder, exist_ok=True)
-    create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_folder, event_targets=event_targets)
-    generate_metadata(output_folder, event_metas=[event_targets])
-    os.system("cp dataset_script.py {}".format(output_folder))
+    for phase in phases:
+        root_folder = os.path.join(root_folder_src, phase)
+        output_folder = os.path.join(output_folder_src, phase)
+        remove_all_DS_Store(root_folder)
+        out_events_folder = os.path.join(output_folder, "images")
+        out_rgb_folder = os.path.join(output_folder, "conditioning_images")
+        out_flow_folder = os.path.join(output_folder, "optical_flow")
+        os.makedirs(out_rgb_folder, exist_ok=True)
+        os.makedirs(out_events_folder, exist_ok=True)
+        os.makedirs(out_flow_folder, exist_ok=True)
+        # create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_folder, event_targets=event_targets)
+        generate_metadata(output_folder, event_metas=[event_targets])
+        os.system("cp dataset_script.py {}".format(output_folder))

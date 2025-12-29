@@ -56,7 +56,7 @@ from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
 from utils import load_flow, flow_16bit_to_float, flow_rescale
 from utils import get_vis_sample
-from eval_quality import calculate_metrics
+from evaluate_controlnet import calculate_metrics
 
 def run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, epoch):
     if accelerator.is_main_process:
@@ -934,14 +934,6 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
             optical_flows_resized.append(
                 flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution)))
 
-            # flow_raw = np.load(flow_path)
-            # flow_raw = np.squeeze(flow_raw).transpose(1, 2, 0)
-            # flow_h, flow_w = flow_raw.shape[0], flow_raw.shape[1]
-            # flow = optical_flow_transforms(flow_raw)
-            # optical_flows.append(flow)
-            # flow_resized = resize_and_center_crop(flow_raw, (args.resolution, args.resolution))
-            # optical_flows_resized.append(flow_rescale(flow_resized, (flow_w, flow_h), (args.resolution, args.resolution)))
-        # warp_image_path = examples.get("warped_image", None)
         examples["pixel_values"] = images
         examples["conditioning_pixel_values"] = conditioning_images
         examples["input_ids"] = tokenize_captions(examples)
@@ -1328,7 +1320,7 @@ def main(args):
     )
 
     run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, 9999)
-    run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, 9999, out_f, train_loss=0.0, valid_loss=0.0, lr=args.learning_rate)
+    # run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, 9999, out_f, train_loss=0.0, valid_loss=0.0, lr=args.learning_rate)
 
     for epoch in range(first_epoch, args.num_train_epochs):
         train_loss, val_loss = 0, 0
@@ -1564,7 +1556,7 @@ def main(args):
         # out_f.flush()
 
         if accelerator.is_main_process:
-            run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, epoch, out_f, train_loss=avg_loss, valid_loss=avg_val_loss, lr=lr_scheduler.get_last_lr()[0])
+            # run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, epoch, out_f, train_loss=avg_loss, valid_loss=avg_val_loss, lr=lr_scheduler.get_last_lr()[0])
             run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, epoch)
 
     # Create the pipeline using using the trained modules and save it.
