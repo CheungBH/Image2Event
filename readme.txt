@@ -19,6 +19,9 @@ python inference_flow.py --output_folder assets/DSEC_RAFT_single --input_folder 
 
 Download DSEC_det
 
+cd datasets
 python dsec_preprocess.py
 python dsec_gen_dataset.py
+
+cd ..
 python train_controlnet.py --pretrained_model_name_or_path="stable-diffusion-v1-5/stable-diffusion-v1-5" --output_dir=exp/1227_mse --train_data_dir=data/RAFT_flow_dataset/train  --validation_data_dir=data/RAFT_flow_dataset/test  --resolution=512 --learning_rate=1e-5 --train_batch_size=6 --num_train_epochs=30 --add_optical_flow --of_norm_factor 50 --checkpointing_steps 1000

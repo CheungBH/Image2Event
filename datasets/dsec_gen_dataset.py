@@ -74,6 +74,6 @@ if __name__ == '__main__':
         os.makedirs(out_rgb_folder, exist_ok=True)
         os.makedirs(out_events_folder, exist_ok=True)
         os.makedirs(out_flow_folder, exist_ok=True)
-        # create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_folder, event_targets=event_targets)
+        create_folders(root_folder, out_events_folder, out_rgb_folder, out_flow_folder, event_targets=event_targets)
         generate_metadata(output_folder, event_metas=[event_targets])
         os.system("cp dataset_script.py {}".format(output_folder))

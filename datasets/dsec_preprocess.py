@@ -239,61 +239,64 @@ if __name__ == "__main__":
     sample_interval = 5
     temporal_intervals = [1,2,3]
     reverse = [False, True]
-    output_root = "data/DSEC_dataset/train"
+    phases = ["train", "test"]
+    input_root = "data/DSEC_det_original"
+    output_root = "data/DSEC_dataset"
 
-    root_folder = "data/DSEC_det_original/train"
-    kw = []
+    for phase in phases:
+        kw = []
+        root_folder = os.path.join(input_root, phase)
+        output_folder = os.path.join(output_root, phase)
+        original_folders = os.listdir(root_folder)
+        print(f"original_folders: {original_folders}")
+        if kw:
+            folders = [folder for folder in original_folders if folder in kw]
+        else:
+            folders = original_folders
+        print("Found {} folders matching keywords.".format(len(folders)))
 
-    original_folders = os.listdir(root_folder)
-    print(f"original_folders: {original_folders}")
-    if kw:
-        folders = [folder for folder in original_folders if folder in kw]
-    else:
-        folders = original_folders
-    print("Found {} folders matching keywords.".format(len(folders)))
+        folders_path = [
+            os.path.join(root_folder, folder) for folder in folders
+        ]
 
-    folders_path = [
-        os.path.join(root_folder, folder) for folder in folders
-    ]
-
-    for folder_path in folders_path:
-        # if len(kw) and not any(k in folder_path for k in kw):
-        #     print("Skipping folder:", folder_path)
-        #     continue
-
-        print("Processing folder:", folder_path)
-        directions = ["left"]
-        folder_name = os.path.basename(folder_path)
-
-        for direction in directions:
-            event_path = os.path.join(folder_path, "events", direction, "events.h5")
-            time_stamp_file = os.path.join(folder_path, "images", direction, "exposure_timestamps.txt")
-
-            if not os.path.exists(event_path):
+        for folder_path in folders_path:
+            if len(kw) and not any(k in folder_path for k in kw):
+                print("Skipping folder:", folder_path)
                 continue
 
-            output_path = os.path.join(output_root, "{}_{}".format(folder_name, direction))
-            # if os.path.exists(output_path):
-            #     print("Output path exists, skipping:", output_path)
-            #     continue
+            print("Processing folder:", folder_path)
+            directions = ["left"]
+            folder_name = os.path.basename(folder_path)
 
-            visualizer = EventVisualizer(sensor_size=(*SENSOR_SIZE, 2))
-            frame_interval = load_timestamp(time_stamp_file)
+            for direction in directions:
+                event_path = os.path.join(folder_path, "events", direction, "events.h5")
+                time_stamp_file = os.path.join(folder_path, "images", direction, "exposure_timestamps.txt")
 
-            events_file, total_events = visualizer.load_events_safely(event_path, shuffle_p=False)
+                if not os.path.exists(event_path):
+                    continue
 
-            try:
-                for r in reverse:
-                    visualizer.generate_frame_sequence(
-                        events_file,
-                        total_events,
-                        SENSOR_SIZE,
-                        frame_interval=frame_interval,
-                        output_dir=output_path,
-                        root_dir=folder_path,
-                        sample_interval=sample_interval,
-                        temporal_intervals=temporal_intervals,
-                        reverse=r
-                    )
-            finally:
-                events_file.close()  # Ensure the HDF5 file is always closed
+                output_path = os.path.join(output_folder, "{}_{}".format(folder_name, direction))
+                if os.path.exists(output_path):
+                    print("Output path exists, skipping:", output_path)
+                    continue
+
+                visualizer = EventVisualizer(sensor_size=(*SENSOR_SIZE, 2))
+                frame_interval = load_timestamp(time_stamp_file)
+
+                events_file, total_events = visualizer.load_events_safely(event_path, shuffle_p=False)
+
+                try:
+                    for r in reverse:
+                        visualizer.generate_frame_sequence(
+                            events_file,
+                            total_events,
+                            SENSOR_SIZE,
+                            frame_interval=frame_interval,
+                            output_dir=output_path,
+                            root_dir=folder_path,
+                            sample_interval=sample_interval,
+                            temporal_intervals=temporal_intervals,
+                            reverse=r
+                        )
+                finally:
+                    events_file.close()  # Ensure the HDF5 file is always closed

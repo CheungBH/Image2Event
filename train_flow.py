@@ -213,8 +213,7 @@ def train(args):
                         if val_dataset == 'KITTI':
                             evaluate_flow.validate_kitti(model.module)
                         elif val_dataset == 'DSEC_RAFT':
-                            dsec_root = getattr(settings, 'dsec_root', args.dataset_root)
-                            evaluate_flow.validate_dsec(model.module, root=dsec_root, split='test')
+                            evaluate_flow.validate_dsec(model.module, root=dataset_root, split='test')
 
                 model.train()
 
