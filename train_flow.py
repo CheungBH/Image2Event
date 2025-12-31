@@ -44,7 +44,30 @@ SUM_FREQ = 100
 VAL_FREQ = 5000
 
 
-def sequence_loss(flow_preds, flow_gt, valid, gamma=0.8, max_flow=MAX_FLOW):
+def sliced_wasserstein(x, y, num_projections=50):
+    """ Sliced Wasserstein Distance between two sets of vectors """
+    # x, y: [N, D]
+    device = x.device
+    dim = x.shape[1]
+    
+    # Random projections
+    projections = torch.randn(dim, num_projections, device=device)
+    projections = projections / (torch.norm(projections, dim=0, keepdim=True) + 1e-8)
+    
+    # Project
+    x_proj = x @ projections # [N, num_projections]
+    y_proj = y @ projections # [N, num_projections]
+    
+    # Sort
+    x_proj_sorted, _ = torch.sort(x_proj, dim=0)
+    y_proj_sorted, _ = torch.sort(y_proj, dim=0)
+    
+    # L1 distance
+    wd = torch.abs(x_proj_sorted - y_proj_sorted).mean()
+    return wd
+
+
+def sequence_loss(flow_preds, flow_gt, valid, gamma=0.8, max_flow=MAX_FLOW, loss_type='mse'):
     """ Loss function defined over sequence of flow predictions """
 
     n_predictions = len(flow_preds)    
@@ -56,8 +79,40 @@ def sequence_loss(flow_preds, flow_gt, valid, gamma=0.8, max_flow=MAX_FLOW):
 
     for i in range(n_predictions):
         i_weight = gamma**(n_predictions - i - 1)
-        i_loss = (flow_preds[i] - flow_gt).abs()
-        flow_loss += i_weight * (valid[:, None] * i_loss).mean()
+        
+        if loss_type == 'mse':
+            i_loss = (flow_preds[i] - flow_gt).abs()
+            flow_loss += i_weight * (valid[:, None] * i_loss).mean()
+        elif loss_type == 'directional':
+            # Cosine similarity loss (Direction matching, scale invariant)
+            dot = torch.sum(flow_preds[i] * flow_gt, dim=1)
+            mag_pred = torch.sum(flow_preds[i]**2, dim=1).sqrt()
+            mag_gt = torch.sum(flow_gt**2, dim=1).sqrt()
+            cos = dot / (mag_pred * mag_gt + 1e-8)
+            cos_loss = 1.0 - cos
+
+            # Sliced Wasserstein Distance (Distribution matching, scale invariant via normalization)
+            # Flatten and select valid pixels
+            mask = valid.bool() # [B, H, W]
+            
+            # Permute to [B, H, W, 2] then select valid
+            p_vecs = flow_preds[i].permute(0, 2, 3, 1)[mask] # [N, 2]
+            g_vecs = flow_gt.permute(0, 2, 3, 1)[mask]       # [N, 2]
+            
+            # Normalize to match distribution shapes regardless of global scale/shift
+            p_mean, p_std = p_vecs.mean(dim=0), p_vecs.std(dim=0)
+            g_mean, g_std = g_vecs.mean(dim=0), g_vecs.std(dim=0)
+            
+            p_norm = (p_vecs - p_mean) / (p_std + 1e-8)
+            g_norm = (g_vecs - g_mean) / (g_std + 1e-8)
+            
+            swd_loss = sliced_wasserstein(p_norm, g_norm)
+            
+            # Combine: Cosine (local direction) + SWD (global distribution shape)
+            i_loss = (valid * cos_loss).sum() / (valid.sum() + 1e-8) + swd_loss
+            flow_loss += i_weight * i_loss
+        else:
+            raise ValueError(f"Unknown loss type: {loss_type}")
 
     epe = torch.sum((flow_preds[-1] - flow_gt)**2, dim=1).sqrt()
     epe = epe.view(-1)[valid.view(-1)]
@@ -192,7 +247,7 @@ def train(args):
 
             flow_predictions = model(image1, image2, iters=args.iters)
 
-            loss, metrics = sequence_loss(flow_predictions, flow, valid, args.gamma)
+            loss, metrics = sequence_loss(flow_predictions, flow, valid, args.gamma, loss_type=args.loss)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -254,6 +309,7 @@ if __name__ == '__main__':
     parser.add_argument('--clip', type=float, default=1.0)
     parser.add_argument('--dropout', type=float, default=0.0)
     parser.add_argument('--gamma', type=float, default=0.8, help='exponential weighting')
+    parser.add_argument('--loss', type=str, default='mse', choices=['mse', 'directional'], help='loss function')
     parser.add_argument('--add_noise', action='store_true')
     args = parser.parse_args()
 
