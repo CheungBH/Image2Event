@@ -88,8 +88,8 @@ def run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, a
             for _ in range(args.num_validation_images):
                 with inference_ctx:
                     np_img = np.array(validation_image).astype(np.float32) / 255.0
-                    resized_flow = validation_flow.astype(np.float32) / args.of_norm_factor
-                    
+                    resized_flow = np.array(validation_flow).astype(np.float32) / args.of_norm_factor
+                    resized_flow = np.transpose(resized_flow, (1,2,0))
                     if args.add_warped_image:
                         np_warped_img = np.array(validation_warped_image).astype(np.float32) / 255.0
                         merged_input = np.concatenate([np_img, np_warped_img, resized_flow], axis=2)
@@ -879,7 +879,7 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
 
     image_transforms = transforms.Compose(
         [
-            # transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
             # transforms.Normalize([0.5], [0.5]),
@@ -897,7 +897,7 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
 
     conditioning_image_transforms = transforms.Compose(
         [
-            # transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
             transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
         ]
@@ -927,11 +927,14 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
             flow_raw = np.load(flow_path)
             flow_raw = np.squeeze(flow_raw).transpose(1, 2, 0)
             flow_h, flow_w = flow_raw.shape[0], flow_raw.shape[1]
-            flow = optical_flow_transforms(flow_raw)
-            optical_flows.append(flow)
+            # flow = optical_flow_transforms(flow_raw)
             resized_flow = np.resize(flow_raw, (args.resolution, args.resolution, 2))
-            optical_flows_resized.append(
-                flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution)))
+            rescaled_flow = flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution))
+            optical_flows.append(torch.from_numpy(rescaled_flow).permute(2, 0, 1).float())
+            optical_flows_resized.append(torch.from_numpy(rescaled_flow).permute(2, 0, 1).float())
+            # optical_flows_resized.append(
+            #     flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution)))
+            # optical_flows.append(flow)
 
         examples["pixel_values"] = images
         examples["conditioning_pixel_values"] = conditioning_images
