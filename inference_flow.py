@@ -125,8 +125,9 @@ def merge_images(input_folders, output_folder, notes, colors, temporal_score_pat
         cv2.waitKey(1)
 
 
-def load_image(imfile):
+def load_image(imfile, size=(640,480)):
     img = np.array(Image.open(imfile)).astype(np.uint8)
+    img = cv2.resize(img, size)
     if len(img.shape) == 2:
         img = np.stack([img]*3, axis=-1)
     elif img.shape[2] == 4:
@@ -283,7 +284,7 @@ def demo(args, original_image_folder, flow_folder, warped_image_folder, frame_fo
                 cv2.imwrite(warped_path, cv2.cvtColor(warped, cv2.COLOR_RGB2BGR))
                 flow_np = flow_up_unpad[0].permute(1, 2, 0).cpu().numpy()
                 np.save(flow_path, flow_np)
-                save_image(image1, os.path.join(frame_folder, f'{base_name}.png'))
+                # save_image(image1, os.path.join(frame_folder, f'{base_name}.png'))
 
                 # Calculate diffusion score and write to temporal score file
                 score = calculate_diffusion_score(flow_np)
@@ -327,5 +328,5 @@ if __name__ == '__main__':
     temporal_score_path = os.path.join(output_root, 'temporal_score.txt')
     demo(args, original_image_root, flow_root, warped_image_root, frame_root, flow_lines_root, flow_colors_root, scale=1.0, temporal_score_path=temporal_score_path)
     out_merged_path = os.path.join(output_root, 'merged')
-    inp_folders = [frame_root, warped_image_root, flow_lines_root, flow_colors_root]
+    inp_folders = [original_image_root, warped_image_root, flow_lines_root, flow_colors_root]
     merge_images(inp_folders, out_merged_path, notes, colors, temporal_score_path=temporal_score_path)

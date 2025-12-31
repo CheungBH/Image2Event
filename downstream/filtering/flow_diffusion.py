@@ -3,21 +3,6 @@ import numpy as np
 import os
 import tqdm
 
-def visualize_optical_flow(flow, frame, window_name="Optical Flow"):
-    h, w = frame.shape[:2]
-    step = 16
-    y, x = np.mgrid[step/2:h:step, step/2:w:step].reshape(2, -1).astype(int)
-    fx, fy = flow[y, x].T
-    lines = np.vstack([x, y, x + fx, y + fy]).T.reshape(-1, 2, 2)
-    lines = np.int32(lines + 0.5)
-    vis = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    cv2.polylines(vis, lines, 0, (0, 255, 0))
-    for (x1, y1), (_x2, _y2) in lines:
-        cv2.circle(vis, (x1, y1), 1, (0, 255, 0), -1)
-    vis = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
-    # cv2.imshow(window_name, vis)
-    return vis
-
 
 def calculate_diffusion_score(optical_flow):
     """
@@ -37,7 +22,6 @@ def calculate_diffusion_score(optical_flow):
 
     # 只考虑足够大的光流向量
     large_flow_mask = magnitude > np.percentile(magnitude, 50)  # 只考虑前50%的光流
-
 
     center_x, center_y = W // 2, H // 2
 
@@ -92,65 +76,33 @@ def calculate_diffusion_score(optical_flow):
 
     return float(final_score)
 
-def calculate_hole_ratio_point_mapping(flow):
-    h, w = flow.shape[:2]
-    mask = np.zeros((h, w), dtype=bool)
-    grid_x, grid_y = np.meshgrid(np.arange(w), np.arange(h))
-    map_x = np.round(grid_x + flow[..., 0]).astype(int)
-    map_y = np.round(grid_y + flow[..., 1]).astype(int)
-    valid = (map_x >= 0) & (map_x < w) & (map_y >= 0) & (map_y < h)
-    mask[map_y[valid], map_x[valid]] = True
-    hole_ratio = 1.0 - np.sum(mask) / (h * w)
-    return hole_ratio
 
 if __name__ == '__main__':
-    flow_folder = "/media/bhzhang/Crucial/diffusion_project/RAFT_asset/former_checkpoint_for_bdd100k/flow"
-    display_img_folder = ""
-    warped_folder = ""
-    output_folder = ""
-    if output_folder:
-        os.makedirs(output_folder, exist_ok=True)
+    flow_folder = "/home/bhzhang/Documents/code/Image2Event/assets/DSEC_RAFT_single_BDD100k/flow"
 
-    scores_file_path = "/media/bhzhang/Crucial/diffusion_project/RAFT_asset/former_checkpoint_for_bdd100k/hole_scores.txt"
-    ratios_file_path = "/media/bhzhang/Crucial/diffusion_project/RAFT_asset/former_checkpoint_for_bdd100k/diffusion_ratios.txt"
+    # 初始化累加器和计数器
+    total_score = 0.0
+    count = 0
 
-    flow_tqdm = tqdm.tqdm(os.listdir(flow_folder))
-    with open(scores_file_path, 'w') as scores_file, open(ratios_file_path, 'w') as ratios_file:
-        scores_file.write("name,score\n")
-        ratios_file.write("name,ratio\n")
+    # 遍历所有flow文件
+    flow_files = [f for f in os.listdir(flow_folder) if f.endswith('.npy')]
+    flow_tqdm = tqdm.tqdm(flow_files, desc="Processing flows")
 
-        for flow_file in flow_tqdm:
-            if not flow_file.endswith('.npy'):
-                continue
+    for flow_file in flow_tqdm:
+        flow_path = os.path.join(flow_folder, flow_file)
+        optical_flow = np.load(flow_path)
+        score = calculate_diffusion_score(optical_flow)
 
-            flow_path = os.path.join(flow_folder, flow_file)
-            optical_flow = np.load(flow_path)
-            score = calculate_diffusion_score(optical_flow)
-            hole_ratio = calculate_hole_ratio_point_mapping(optical_flow)
+        total_score += score
+        count += 1
 
-            file_name = flow_file.replace(".npy", "")
-            scores_file.write(f"{file_name},{score:.4f}\n")
-            ratios_file.write(f"{file_name},{hole_ratio:.4f}\n")
+        # 可选：实时显示进度
+        flow_tqdm.set_postfix({"avg_score": f"{total_score / count:.4f}"})
 
-            score_str = f"Diffusion score: {score:.4f}; Hole ratio: {hole_ratio:.4f}"
-            # print(f"{flow_file}: {score_str}")
-            if output_folder:
-                image_path = os.path.join(display_img_folder, flow_file.replace(".npy", ".png"))
-                raw_img = cv2.imread(image_path)
-                if raw_img is None:
-                    print(f"Warning: Could not read image {image_path}. Skipping visualization for {flow_file}.")
-                    continue
-
-                h, w = raw_img.shape[:2]
-                flow_vis_im = visualize_optical_flow(optical_flow, raw_img)
-                grid_x, grid_y = np.meshgrid(np.arange(w), np.arange(h))
-                map_x = (grid_x + optical_flow[..., 0]).astype(np.float32)
-                map_y = (grid_y + optical_flow[..., 1]).astype(np.float32)
-
-                warped_image = cv2.remap(raw_img, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
-                                         borderValue=(0, 0, 0))
-                label_image = np.zeros((50, flow_vis_im.shape[1], 3), dtype=np.uint8) + 255
-                cv2.putText(label_image, score_str, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                merged_img = cv2.vconcat([raw_img, flow_vis_im, label_image])
-
-                cv2.imwrite(os.path.join(output_folder, flow_file.replace(".npy", ".png")), merged_img)
+    # 计算并打印平均值
+    if count > 0:
+        avg_score = total_score / count
+        print(f"\n✅ Average diffusion score: {avg_score:.4f}")
+        print(f"📊 Processed {count} flow files")
+    else:
+        print("❌ No flow files found in the folder")
