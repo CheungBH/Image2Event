@@ -54,8 +54,7 @@ from diffusers.utils import check_min_version, is_wandb_available
 from diffusers.utils.hub_utils import load_or_create_model_card, populate_model_card
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.torch_utils import is_compiled_module
-from utils import load_flow, flow_16bit_to_float, flow_rescale
-from utils import get_vis_sample
+from utils.utils import load_flow, flow_16bit_to_float, flow_rescale, get_vis_sample
 from evaluate_controlnet import calculate_metrics
 
 def run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataset, epoch):

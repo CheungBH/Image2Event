@@ -71,8 +71,6 @@ def binarize_array(img_rgb, threshold=127):
     Returns uint8 binary image (0 or 255) per channel.
     """
     arr = img_rgb
-    # Green channel to be 0 directly
-    img_rgb[..., 1] = 0
     if not isinstance(arr, np.ndarray):
         arr = np.array(arr)
     if arr.dtype != np.uint8:
@@ -137,15 +135,28 @@ def visualize(args):
             continue
         rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
 
-        # height, width = rgb_image.shape[:2]
-        # aspect_ratio = width / height if height != 0 else 1.0
+        height, width = rgb_image.shape[:2]
+        aspect_ratio = width / height if height != 0 else 1.0
         new_height = args.resolution
-        # new_width = int(new_height * aspect_ratio)
+        new_width = int(new_height * aspect_ratio)
         # keep original behavior (the original code used new_height twice mistakenly)
         rgb_image = cv2.resize(rgb_image, (new_height, new_height))
 
         for p_idx, prompt in enumerate(args.prompts):
-            prompt_images = [rgb_image]
+            if args.event_input_dir:
+                # when events_name list is empty original logic used filename->png replacement
+                event_path = os.path.join(args.event_input_dir, file_name.replace(".jpg", ".png"))
+                event_image = cv2.imread(event_path)
+                if event_image is None:
+                    print(f"Event image not found: {event_path}, skipping event.")
+                    prompt_images = [rgb_image]
+                else:
+                    event_image = cv2.resize(event_image, (new_height, new_height))
+                    event_image = cv2.cvtColor(event_image, cv2.COLOR_BGR2RGB)
+                    prompt_images = [event_image, rgb_image]
+            else:
+                prompt_images = [rgb_image]
+
             optical_flow_path = os.path.join(args.optical_flow_input_dir, file_name.replace(".jpg", ".npy").replace(".png", ".npy"))
             if not os.path.exists(optical_flow_path):
                 optical_flow_path = optical_flow_path.replace(".npy", "-1.npy")
@@ -155,6 +166,10 @@ def visualize(args):
                         print(f"Optical flow file not found: {optical_flow_path}, skipping.")
                         continue
             optical_flow = np.load(optical_flow_path).squeeze()
+            flow_max = np.max(np.abs(optical_flow))
+            if args.flow_max != -1 and flow_max > 0:
+                rescale_factor = args.flow_max * 0.8 / flow_max
+                optical_flow = optical_flow * rescale_factor
             if optical_flow.shape[0] < 5:
                 optical_flow = optical_flow.transpose(1, 2, 0)
             of_h, of_w = optical_flow.shape[:2]
