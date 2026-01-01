@@ -21,6 +21,10 @@ import random
 from utils.utils import *
 
 
+import sys
+sys.path.append('downstream')
+from hist_JS_optim import FlowDistributionScaler
+
 def parse_args():
     parser = argparse.ArgumentParser(description="ControlNet Visualization Tool")
     parser.add_argument("--pretrained_model_path", type=str, required=True)
@@ -41,7 +45,7 @@ def parse_args():
     parser.add_argument("--guidance_scale", type=float, default=7.5)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--repeat", type=int, default=4)
-    parser.add_argument("--flow_max", type=int, default=-1)
+    parser.add_argument("--source_flow_stats_dir", type=str, required=True, help="Path to source flow distribution stats for JS optimization")
     parser.add_argument("--enable_xformers", action="store_true")
     parser.add_argument("--save_result_only", action="store_true")
     parser.add_argument("--binarize", action="store_true", help="Binarize generated outputs (per-channel RGB)")
@@ -119,6 +123,10 @@ def visualize(args):
     random.shuffle(rgb_files)
     print(f"Found {len(rgb_files)} images to process")
 
+    print(f"Loading source flow distribution from {args.source_flow_stats_dir}")
+    flow_scaler = FlowDistributionScaler()
+    flow_scaler.load_source_distribution(args.source_flow_stats_dir)
+
     for file_name in tqdm(rgb_files, desc="Processing images"):
         if args.save_result_only:
             output = os.path.join(args.output_dir, file_name)
@@ -166,10 +174,29 @@ def visualize(args):
                         print(f"Optical flow file not found: {optical_flow_path}, skipping.")
                         continue
             optical_flow = np.load(optical_flow_path).squeeze()
-            flow_max = np.max(np.abs(optical_flow))
-            if args.flow_max != -1 and flow_max > 0:
-                rescale_factor = args.flow_max * 0.8 / flow_max
-                optical_flow = optical_flow * rescale_factor
+            
+            # Prepare flow for scaler: needs (2, H, W)
+            temp_flow = optical_flow
+            is_chw = True
+            if temp_flow.shape[0] > 5: # likely (H, W, 2)
+                temp_flow = temp_flow.transpose(2, 0, 1)
+                is_chw = False
+            
+            try:
+                # Suppress prints from optimization if desired, but keeping for info
+                optim_res = flow_scaler.optimize_scale_for_single_image(temp_flow)
+                scale_x = optim_res['scale_x']
+                scale_y = optim_res['scale_y']
+                
+                if is_chw:
+                    optical_flow[0] *= scale_x
+                    optical_flow[1] *= scale_y
+                else:
+                    optical_flow[:, :, 0] *= scale_x
+                    optical_flow[:, :, 1] *= scale_y
+            except Exception as e:
+                print(f"Flow scaling optimization failed for {file_name}: {e}")
+            
             if optical_flow.shape[0] < 5:
                 optical_flow = optical_flow.transpose(1, 2, 0)
             of_h, of_w = optical_flow.shape[:2]
@@ -211,10 +238,7 @@ def visualize(args):
                             PIL_image = Image.fromarray(binarize_array(np.array(PIL_image), threshold=args.binarize_threshold))
                         PIL_image.save(annotated_path)
                 else:
-                    if args.merged:
-                        out = os.path.join(args.output_dir, file_name.split(".")[0] + "---scale-{}---".format(scale) + prompt.replace(" ", "_") + ".jpg")
-                    else:
-                        out = os.path.join(args.output_dir, file_name.split(".")[0] + "---scale-{}---".format(scale) + prompt.replace(" ", "_"))
+                    out = os.path.join(args.output_dir, file_name.split(".")[0] + "---scale-{}---".format(scale) + prompt.replace(" ", "_"))
                     if os.path.exists(out):
                         print("Result already exists, skipping:", out)
                         continue
@@ -232,30 +256,21 @@ def visualize(args):
                         except:
                             prompt_images.append(np.asarray(output[0][0]))
 
-                    if args.merged:
-                        concatenated_image = np.hstack(prompt_images)
-                        w = concatenated_image.shape[1]
-                        prompt_image = np.ones((100, w, 3), dtype=np.uint8) * 255
-                        cv2.putText(prompt_image, f"Prompt: {prompt}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
-                        full_vis = np.vstack([prompt_image, concatenated_image])
+
+                    os.makedirs(out, exist_ok=True)
+                    if args.event_input_dir:
+                        event_img = prompt_images.pop(0)
                         if args.binarize:
-                            full_vis = binarize_array(full_vis, threshold=args.binarize_threshold)
-                        cv2.imwrite(out, cv2.cvtColor(full_vis, cv2.COLOR_RGB2BGR))
-                    else:
-                        os.makedirs(out, exist_ok=True)
-                        if args.event_input_dir:
-                            event_img = prompt_images.pop(0)
-                            if args.binarize:
-                                event_img = binarize_array(event_img, threshold=args.binarize_threshold)
-                            cv2.imwrite(os.path.join(out, "event.jpg"), cv2.cvtColor(event_img, cv2.COLOR_RGB2BGR))
-                        rgb_img = prompt_images.pop(0)
-                        if args.binarize:
-                            rgb_img = binarize_array(rgb_img, threshold=args.binarize_threshold)
-                        cv2.imwrite(os.path.join(out, "RGB.jpg"), cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR))
-                        for idx, prompt_image in enumerate(prompt_images):
-                            img_to_save = binarize_array(prompt_image, threshold=args.binarize_threshold) if args.binarize else prompt_image
-                            cv2.imwrite(os.path.join(out, f"generated_{idx}.jpg"), cv2.cvtColor(img_to_save, cv2.COLOR_RGB2BGR))
-                        prompt_images = [rgb_image] if not args.event_input_dir else [event_img, rgb_image]
+                            event_img = binarize_array(event_img, threshold=args.binarize_threshold)
+                        cv2.imwrite(os.path.join(out, "event.jpg"), cv2.cvtColor(event_img, cv2.COLOR_RGB2BGR))
+                    rgb_img = prompt_images.pop(0)
+                    if args.binarize:
+                        rgb_img = binarize_array(rgb_img, threshold=args.binarize_threshold)
+                    cv2.imwrite(os.path.join(out, "RGB.jpg"), cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR))
+                    for idx, prompt_image in enumerate(prompt_images):
+                        img_to_save = binarize_array(prompt_image, threshold=args.binarize_threshold) if args.binarize else prompt_image
+                        cv2.imwrite(os.path.join(out, f"generated_{idx}.jpg"), cv2.cvtColor(img_to_save, cv2.COLOR_RGB2BGR))
+                    prompt_images = [rgb_image] if not args.event_input_dir else [event_img, rgb_image]
 
     del pipeline, controlnet, vae
     gc.collect()
