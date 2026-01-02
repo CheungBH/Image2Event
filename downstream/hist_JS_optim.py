@@ -566,10 +566,11 @@ class FlowDistributionScaler:
         print("=" * 70)
 
         # 创建输出文件夹
+        scaled_flows_dir = None
         if output_folder and (save_scaled_flows or save_results):
             os.makedirs(output_folder, exist_ok=True)
-            scaled_flows_dir = os.path.join(output_folder, 'scaled_flows')
             if save_scaled_flows:
+                scaled_flows_dir = os.path.join(output_folder, 'scaled_flows')
                 os.makedirs(scaled_flows_dir, exist_ok=True)
 
         # 批量处理
@@ -590,12 +591,12 @@ class FlowDistributionScaler:
             result['filepath'] = file_path
 
             # 应用缩放（可选）
-            if save_scaled_flows:
-                scaled_flow = self.apply_scaling_to_flow(
-                    target_flow, result['scale_x'], result['scale_y']
-                )
-                scaled_filename = f"scaled_{os.path.basename(file_path)}"
-                np.save(os.path.join(scaled_flows_dir, scaled_filename), scaled_flow)
+                if save_scaled_flows and scaled_flows_dir:
+                    scaled_flow = self.apply_scaling_to_flow(
+                        target_flow, result['scale_x'], result['scale_y']
+                    )
+                    scaled_filename = f"scaled_{os.path.basename(file_path)}"
+                    np.save(os.path.join(scaled_flows_dir, scaled_filename), scaled_flow)
                 result['scaled_file'] = os.path.join(scaled_flows_dir, scaled_filename)
 
             all_results.append(result)
