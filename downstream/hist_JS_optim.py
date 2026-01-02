@@ -11,22 +11,22 @@ import matplotlib.pyplot as plt
 
 class FlowDistributionScaler:
     """
-    光流分布缩放器：通过优化JS散度为每张目标域图片找到最优缩放因子
-    分别优化X和Y方向，范围[0.1, 10]，从1.0开始优化
+    Optical flow distribution scaler: find optimal per-image scale factors by minimizing JS divergence.
+    Optimize X and Y independently within [0.1, 10], starting from 1.0.
     """
 
     def __init__(self, source_folder=None, n_samples_per_image=1000, n_kde_components=1000):
         """
-        初始化缩放器
+        Initialize scaler
 
-        参数:
+        Parameters:
         -----------
         source_folder : str, optional
-            源域文件夹路径。如果提供，则立即构建源域分布
+            Source-domain folder path. If provided, build source distribution immediately.
         n_samples_per_image : int
-            每张源域图片的抽样点数
+            Number of samples per source image
         n_kde_components : int
-            KDE核数量
+            Number of KDE components
         """
         self.n_samples_per_image = n_samples_per_image
         self.n_kde_components = n_kde_components
@@ -43,19 +43,19 @@ class FlowDistributionScaler:
 
     def stratified_sampling_from_flow(self, flow, n_samples):
         """
-        分层抽样：从单张光流图中抽样
+        Stratified sampling from a single optical-flow map
 
-        参数:
+        Parameters:
         -----------
         flow : numpy array, shape (2, H, W)
-            光流图
+            Optical flow
         n_samples : int
-            抽样点数
+            Number of samples
 
-        返回:
+        Returns:
         -----------
         x_samples, y_samples : numpy arrays
-            X和Y方向的抽样值
+            Samples of X and Y components
         """
         H, W = flow.shape[1], flow.shape[2]
 
@@ -93,23 +93,23 @@ class FlowDistributionScaler:
 
     def build_kde_from_samples(self, samples, n_components=None):
         """
-        从抽样数据构建KDE分布
+        Build KDE distribution from samples
 
-        参数:
+        Parameters:
         -----------
         samples : numpy array
-            抽样数据
+            Sampled data
         n_components : int, optional
-            KDE核数量。如果为None，使用self.n_kde_components
+            Number of KDE components; if None, use self.n_kde_components
 
-        返回:
+        Returns:
         -----------
         kde_centers : numpy array
-            KDE核中心
+            KDE centers
         kde_weights : numpy array
-            核权重（均匀）
+            Kernel weights (uniform)
         bandwidth : float
-            核带宽
+            Kernel bandwidth
         """
         if n_components is None:
             n_components = self.n_kde_components
@@ -134,47 +134,47 @@ class FlowDistributionScaler:
 
     def kde_density_on_grid(self, kde_centers, kde_weights, bandwidth, grid_points=1000):
         """
-        将KDE分布离散化到网格上
+        Discretize KDE distribution onto a grid
 
-        参数:
+        Parameters:
         -----------
         kde_centers : numpy array
-            KDE核中心
+            KDE centers
         kde_weights : numpy array
-            核权重
+            Kernel weights
         bandwidth : float
-            核带宽
+            Kernel bandwidth
         grid_points : int
-            网格点数
+            Number of grid points
 
-        返回:
+        Returns:
         -----------
         grid : numpy array
-            网格点
+            Grid points
         prob_mass : numpy array
-            每个网格点的概率质量
+            Probability mass at each grid point
         """
-        # 确定网格范围（基于核中心，稍微扩展）
+        # Determine grid range (based on centers, slightly extended)
         x_min, x_max = np.min(kde_centers), np.max(kde_centers)
-        range_extension = (x_max - x_min) * 0.1  # 扩展10%
+        range_extension = (x_max - x_min) * 0.1  # extend by 10%
         x_min -= range_extension
         x_max += range_extension
 
-        # 创建均匀网格
+        # Create uniform grid
         grid = np.linspace(x_min, x_max, grid_points)
         dx = (x_max - x_min) / (grid_points - 1)
 
-        # 计算KDE在网格上的密度
+        # Compute KDE density on grid
         density = np.zeros_like(grid, dtype=float)
         sqrt_2pi = np.sqrt(2 * np.pi)
 
         for center, weight in zip(kde_centers, kde_weights):
-            # 高斯核贡献
+            # Gaussian kernel contribution
             gaussian = np.exp(-0.5 * ((grid - center) / bandwidth) ** 2)
             gaussian /= (sqrt_2pi * bandwidth)
             density += weight * gaussian
 
-        # 转换为概率质量（乘以dx）并归一化
+        # Convert density to probability mass (multiply by dx) and normalize
         prob_mass = density * dx
         prob_mass /= np.sum(prob_mass)
 
@@ -182,26 +182,26 @@ class FlowDistributionScaler:
 
     def build_source_distribution(self, source_folder, grid_points=1000):
         """
-        构建源域分布（离线处理）
+        Build source-domain distribution (offline)
 
-        参数:
+        Parameters:
         -----------
         source_folder : str
-            源域文件夹路径
+            Source-domain folder path
         grid_points : int
-            离散化网格点数
+            Number of grid points for discretization
         """
         print("=" * 70)
-        print("构建源域分布")
+        print("Building source distribution")
         print("=" * 70)
 
         # 获取源域文件列表
         source_files = sorted(glob.glob(os.path.join(source_folder, "*.npy")))
         if not source_files:
-            raise ValueError(f"源域文件夹 {source_folder} 中没有找到npy文件")
+            raise ValueError(f"No npy files found in source folder {source_folder}")
 
-        print(f"找到 {len(source_files)} 个源域文件")
-        print(f"每张图抽样 {self.n_samples_per_image} 个点")
+        print(f"Found {len(source_files)} source files")
+        print(f"Sampling {self.n_samples_per_image} points per image")
 
         # 收集所有抽样点
         all_x_samples = []
@@ -209,7 +209,7 @@ class FlowDistributionScaler:
 
         start_time = time.time()
 
-        for i, file_path in enumerate(tqdm(source_files, desc="处理源域文件")):
+        for i, file_path in enumerate(tqdm(source_files, desc="Processing source files")):
             # 加载光流图
             flow = np.load(file_path).squeeze()  # (2, H, W)
 
@@ -224,13 +224,13 @@ class FlowDistributionScaler:
             # 每处理100个文件打印一次进度
             if (i + 1) % 100 == 0:
                 elapsed = time.time() - start_time
-                print(f"已处理 {i + 1}/{len(source_files)} 个文件，用时 {elapsed:.1f}秒")
+                print(f"Processed {i + 1}/{len(source_files)} files, elapsed {elapsed:.1f}s")
 
         all_x_samples = np.array(all_x_samples)
         all_y_samples = np.array(all_y_samples)
 
-        print(f"X方向抽样完成: {len(all_x_samples)} 个点")
-        print(f"Y方向抽样完成: {len(all_y_samples)} 个点")
+        print(f"X samples collected: {len(all_x_samples)} points")
+        print(f"Y samples collected: {len(all_y_samples)} points")
 
         # 保存源域统计信息
         self.source_stats = {
@@ -244,24 +244,24 @@ class FlowDistributionScaler:
             'n_samples_y': len(all_y_samples)
         }
 
-        print("\n源域统计信息:")
-        print(f"  X方向: 均值={self.source_stats['x_mean']:.4f}, "
-              f"标准差={self.source_stats['x_std']:.4f}, "
-              f"中位数={self.source_stats['x_median']:.4f}")
-        print(f"  Y方向: 均值={self.source_stats['y_mean']:.4f}, "
-              f"标准差={self.source_stats['y_std']:.4f}, "
-              f"中位数={self.source_stats['y_median']:.4f}")
+        print("\nSource statistics:")
+        print(f"  X: mean={self.source_stats['x_mean']:.4f}, "
+              f"std={self.source_stats['x_std']:.4f}, "
+              f"median={self.source_stats['x_median']:.4f}")
+        print(f"  Y: mean={self.source_stats['y_mean']:.4f}, "
+              f"std={self.source_stats['y_std']:.4f}, "
+              f"median={self.source_stats['y_median']:.4f}")
 
         # 构建KDE分布
-        print("\n构建KDE分布...")
+        print("\nBuilding KDE distributions...")
         kde_centers_x, kde_weights_x, bandwidth_x = self.build_kde_from_samples(all_x_samples)
         kde_centers_y, kde_weights_y, bandwidth_y = self.build_kde_from_samples(all_y_samples)
 
-        print(f"KDE参数: X方向 {len(kde_centers_x)} 个核, 带宽={bandwidth_x:.4f}")
-        print(f"         Y方向 {len(kde_centers_y)} 个核, 带宽={bandwidth_y:.4f}")
+        print(f"KDE: X with {len(kde_centers_x)} kernels, bandwidth={bandwidth_x:.4f}")
+        print(f"     Y with {len(kde_centers_y)} kernels, bandwidth={bandwidth_y:.4f}")
 
         # 离散化到网格
-        print("\n离散化KDE到网格...")
+        print("\nDiscretizing KDE to grid...")
         self.grid_x, self.prob_mass_x, self.dx = self.kde_density_on_grid(
             kde_centers_x, kde_weights_x, bandwidth_x, grid_points
         )
@@ -269,21 +269,21 @@ class FlowDistributionScaler:
             kde_centers_y, kde_weights_y, bandwidth_y, grid_points
         )
 
-        print(f"网格参数: X方向 {len(self.grid_x)} 个点, dx={self.dx:.6f}")
-        print(f"         Y方向 {len(self.grid_y)} 个点, dy={self.dy:.6f}")
+        print(f"Grid: X has {len(self.grid_x)} points, dx={self.dx:.6f}")
+        print(f"      Y has {len(self.grid_y)} points, dy={self.dy:.6f}")
 
         elapsed = time.time() - start_time
-        print(f"\n源域分布构建完成，总用时 {elapsed:.1f}秒")
+        print(f"\nSource distribution built, total time {elapsed:.1f}s")
         print("=" * 70)
 
     def save_source_distribution(self, save_dir):
         """
-        保存源域分布到文件
+        Save source distribution to files
 
-        参数:
+        Parameters:
         -----------
         save_dir : str
-            保存目录
+            Output directory
         """
         os.makedirs(save_dir, exist_ok=True)
 
@@ -302,16 +302,16 @@ class FlowDistributionScaler:
         with open(os.path.join(save_dir, 'source_stats.json'), 'w') as f:
             json.dump(self.source_stats, f, indent=2)
 
-        print(f"源域分布已保存到: {save_dir}")
+        print(f"Source distribution saved to: {save_dir}")
 
     def load_source_distribution(self, load_dir):
         """
-        从文件加载源域分布
+        Load source distribution from files
 
-        参数:
+        Parameters:
         -----------
         load_dir : str
-            加载目录
+            Directory to load from
         """
         data = np.load(os.path.join(load_dir, 'source_distribution.npz'))
 
@@ -325,34 +325,34 @@ class FlowDistributionScaler:
         with open(os.path.join(load_dir, 'source_stats.json'), 'r') as f:
             self.source_stats = json.load(f)
 
-        print(f"源域分布已从 {load_dir} 加载")
+        print(f"Source distribution loaded from {load_dir}")
 
     def compute_js_divergence(self, source_prob_mass, target_data, scale, grid, dx):
         """
-        计算JS散度
+        Compute JS divergence
 
-        参数:
+        Parameters:
         -----------
         source_prob_mass : numpy array
-            源域分布的概率质量（离散化）
+            Probability mass of source distribution (discretized)
         target_data : numpy array
-            目标域数据
+            Target data
         scale : float
-            缩放因子
+            Scaling factor
         grid : numpy array
-            网格点
+            Grid points
         dx : float
-            网格间距
+            Grid spacing
 
-        返回:
+        Returns:
         -----------
         js : float
-            JS散度值
+            JS divergence
         """
-        # 缩放目标数据
+        # Scale target data
         scaled_target = target_data * scale
 
-        # 计算目标数据在网格上的直方图
+        # Compute histogram of target data on the grid
         target_hist, _ = np.histogram(
             scaled_target,
             bins=len(grid),
@@ -360,22 +360,22 @@ class FlowDistributionScaler:
             density=True
         )
 
-        # 将密度转换为概率质量（乘以dx）并归一化
+        # Convert density to probability mass (multiply by dx) and normalize
         target_prob_mass = target_hist * dx
         target_prob_mass_sum = np.sum(target_prob_mass)
 
         if target_prob_mass_sum > 0:
             target_prob_mass /= target_prob_mass_sum
         else:
-            # 如果所有点都在网格外，返回一个很大的值
+            # If all points fall outside the grid, return a large penalty
             return 1.0
 
-        # 避免零值
+        # Avoid zeros
         epsilon = 1e-10
         p = np.clip(source_prob_mass, epsilon, None)
         q = np.clip(target_prob_mass, epsilon, None)
 
-        # 计算JS散度
+        # Compute JS divergence
         m = 0.5 * (p + q)
         js = 0.5 * np.sum(p * np.log(p / m)) + 0.5 * np.sum(q * np.log(q / m))
 
@@ -383,19 +383,19 @@ class FlowDistributionScaler:
 
     def optimize_scale_for_single_image(self, target_flow, max_target_samples=10000):
         """
-        为单张目标域图片优化缩放因子
+        Optimize scaling factors for a single target image
 
-        参数:
+        Parameters:
         -----------
         target_flow : numpy array, shape (2, H, W)
-            目标域光流图
+            Target optical-flow map
         max_target_samples : int
-            目标数据最大抽样点数（加速优化）
+            Max number of target samples (to accelerate optimization)
 
-        返回:
+        Returns:
         -----------
         result : dict
-            优化结果，包含缩放因子、JS散度等信息
+            Optimization result containing scales, JS divergence, etc.
         """
         # 提取X和Y方向数据并展平
         target_x = target_flow[0].flatten()
@@ -407,7 +407,7 @@ class FlowDistributionScaler:
             target_x = target_x[indices]
             target_y = target_y[indices]
 
-        print(f"目标数据: {len(target_x)} 个点")
+        print(f"Target data: {len(target_x)} points")
 
         # 分别优化X和Y方向
         results = {'x': None, 'y': None}
@@ -416,7 +416,7 @@ class FlowDistributionScaler:
             ('x', target_x, self.grid_x, self.prob_mass_x, self.dx),
             ('y', target_y, self.grid_y, self.prob_mass_y, self.dy)
         ]:
-            print(f"\n优化 {direction.upper()} 方向...")
+            print(f"\nOptimizing {direction.upper()} direction...")
 
             # 定义目标函数
             def objective(scale):
@@ -445,12 +445,12 @@ class FlowDistributionScaler:
                     'iterations': result.nfev,
                     'time': elapsed
                 }
-                print(f"  最优缩放因子: {result.x:.6f}")
-                print(f"  最小JS散度: {result.fun:.6f}")
-                print(f"  迭代次数: {result.nfev}, 用时: {elapsed:.3f}秒")
+                print(f"  Optimal scale: {result.x:.6f}")
+                print(f"  Minimum JS divergence: {result.fun:.6f}")
+                print(f"  Iterations: {result.nfev}, time: {elapsed:.3f}s")
             else:
-                print(f"  {direction.upper()}方向优化失败: {result.message}")
-                # 使用均值比作为后备方案
+                print(f"  Optimization failed for {direction.upper()}: {result.message}")
+                # Use mean ratio as fallback
                 source_mean = self.source_stats[f'{direction}_mean']
                 target_mean = np.mean(target_data)
                 fallback_scale = source_mean / target_mean if target_mean != 0 else 1.0
@@ -463,7 +463,7 @@ class FlowDistributionScaler:
                     'time': 0,
                     'fallback': True
                 }
-                print(f"  使用后备缩放因子: {fallback_scale:.6f}")
+                print(f"  Using fallback scale: {fallback_scale:.6f}")
 
         # 计算总体结果
         if results['x'] and results['y']:
@@ -500,14 +500,14 @@ class FlowDistributionScaler:
             }
 
             print("\n" + "=" * 50)
-            print("优化结果汇总:")
+            print("Optimization summary:")
             print("=" * 50)
-            print(f"X方向缩放因子: {result_summary['scale_x']:.6f}")
-            print(f"Y方向缩放因子: {result_summary['scale_y']:.6f}")
-            print(f"总体JS散度: 原始={result_summary['js_original']:.6f}, "
-                  f"优化后={result_summary['js_overall']:.6f}")
-            print(f"改进: {result_summary['improvement']:.2f}%")
-            print(f"总优化时间: {result_summary['time_x'] + result_summary['time_y']:.3f}秒")
+            print(f"Scale X: {result_summary['scale_x']:.6f}")
+            print(f"Scale Y: {result_summary['scale_y']:.6f}")
+            print(f"Overall JS: original={result_summary['js_original']:.6f}, "
+                  f"optimized={result_summary['js_overall']:.6f}")
+            print(f"Improvement: {result_summary['improvement']:.2f}%")
+            print(f"Total optimization time: {result_summary['time_x'] + result_summary['time_y']:.3f}s")
 
             return result_summary
         else:
@@ -515,19 +515,19 @@ class FlowDistributionScaler:
 
     def apply_scaling_to_flow(self, flow, scale_x, scale_y):
         """
-        将缩放因子应用到光流图
+        Apply scaling factors to an optical-flow map
 
-        参数:
+        Parameters:
         -----------
         flow : numpy array, shape (2, H, W)
-            原始光流图
+            Original optical flow
         scale_x, scale_y : float
-            X和Y方向的缩放因子
+            Scaling factors for X and Y
 
-        返回:
+        Returns:
         -----------
         scaled_flow : numpy array
-            缩放后的光流图
+            Scaled optical flow
         """
         scaled_flow = flow.copy()
         scaled_flow[0] *= scale_x
@@ -537,32 +537,32 @@ class FlowDistributionScaler:
     def process_target_folder(self, target_folder, output_folder=None,
                               save_scaled_flows=True, save_results=True):
         """
-        批量处理目标域文件夹中的所有图片
+        Batch process all images in a target folder
 
-        参数:
+        Parameters:
         -----------
         target_folder : str
-            目标域文件夹路径
+            Target folder path
         output_folder : str, optional
-            输出文件夹路径
+            Output folder path
         save_scaled_flows : bool
-            是否保存缩放后的光流图
+            Whether to save scaled optical flows
         save_results : bool
-            是否保存优化结果
+            Whether to save optimization results
 
-        返回:
+        Returns:
         -----------
         all_results : list
-            所有图片的优化结果
+            Optimization results for all images
         """
         # 获取目标域文件列表
         target_files = sorted(glob.glob(os.path.join(target_folder, "*.npy")))
         if not target_files:
-            raise ValueError(f"目标域文件夹 {target_folder} 中没有找到npy文件")
+            raise ValueError(f"No npy files found in target folder {target_folder}")
 
         print("=" * 70)
-        print(f"处理目标域文件夹: {target_folder}")
-        print(f"找到 {len(target_files)} 个文件")
+        print(f"Processing target folder: {target_folder}")
+        print(f"Found {len(target_files)} files")
         print("=" * 70)
 
         # 创建输出文件夹
@@ -577,8 +577,8 @@ class FlowDistributionScaler:
         all_results = []
         total_start_time = time.time()
 
-        for i, file_path in enumerate(tqdm(target_files, desc="处理目标域文件")):
-            print(f"\n处理文件 {i + 1}/{len(target_files)}: {os.path.basename(file_path)}")
+        for i, file_path in enumerate(tqdm(target_files, desc="Processing target files")):
+            print(f"\nProcessing file {i + 1}/{len(target_files)}: {os.path.basename(file_path)}")
 
             # 加载目标光流图
             target_flow = np.load(file_path)
@@ -622,25 +622,25 @@ class FlowDistributionScaler:
 
                 json.dump(serializable_results, f, indent=2)
 
-            print(f"\n优化结果已保存到: {results_file}")
+            print(f"\nOptimization results saved to: {results_file}")
 
         # 分析统计结果
         self._analyze_batch_results(all_results)
 
         total_time = time.time() - total_start_time
-        print(f"\n批量处理完成!")
-        print(f"总文件数: {len(target_files)}")
-        print(f"成功处理: {len(all_results)}")
-        print(f"总用时: {total_time:.1f}秒")
-        print(f"平均每帧: {total_time / len(all_results):.3f}秒")
+        print(f"\nBatch processing completed!")
+        print(f"Total files: {len(target_files)}")
+        print(f"Successfully processed: {len(all_results)}")
+        print(f"Total time: {total_time:.1f}s")
+        print(f"Average per frame: {total_time / len(all_results):.3f}s")
         print("=" * 70)
 
         return all_results
 
     def _analyze_batch_results(self, results):
-        """分析批量处理结果"""
+        """Analyze batch results"""
         if not results:
-            print("没有结果可分析")
+            print("No results to analyze")
             return
 
         scales_x = np.array([r['scale_x'] for r in results])
@@ -650,36 +650,36 @@ class FlowDistributionScaler:
         js_original = np.array([r['js_original'] for r in results])
 
         print("\n" + "=" * 70)
-        print("批量处理结果统计")
+        print("Batch statistics")
         print("=" * 70)
 
-        print(f"X方向缩放因子:")
-        print(f"  均值: {np.mean(scales_x):.4f}, 标准差: {np.std(scales_x):.4f}")
-        print(f"  中位数: {np.median(scales_x):.4f}")
-        print(f"  范围: [{np.min(scales_x):.4f}, {np.max(scales_x):.4f}]")
-        print(f"  95%区间: [{np.percentile(scales_x, 2.5):.4f}, {np.percentile(scales_x, 97.5):.4f}]")
+        print(f"Scaling factor X:")
+        print(f"  Mean: {np.mean(scales_x):.4f}, Std: {np.std(scales_x):.4f}")
+        print(f"  Median: {np.median(scales_x):.4f}")
+        print(f"  Range: [{np.min(scales_x):.4f}, {np.max(scales_x):.4f}]")
+        print(f"  95% CI: [{np.percentile(scales_x, 2.5):.4f}, {np.percentile(scales_x, 97.5):.4f}]")
 
-        print(f"\nY方向缩放因子:")
-        print(f"  均值: {np.mean(scales_y):.4f}, 标准差: {np.std(scales_y):.4f}")
-        print(f"  中位数: {np.median(scales_y):.4f}")
-        print(f"  范围: [{np.min(scales_y):.4f}, {np.max(scales_y):.4f}]")
-        print(f"  95%区间: [{np.percentile(scales_y, 2.5):.4f}, {np.percentile(scales_y, 97.5):.4f}]")
+        print(f"\nScaling factor Y:")
+        print(f"  Mean: {np.mean(scales_y):.4f}, Std: {np.std(scales_y):.4f}")
+        print(f"  Median: {np.median(scales_y):.4f}")
+        print(f"  Range: [{np.min(scales_y):.4f}, {np.max(scales_y):.4f}]")
+        print(f"  95% CI: [{np.percentile(scales_y, 2.5):.4f}, {np.percentile(scales_y, 97.5):.4f}]")
 
-        print(f"\nJS散度改进:")
-        print(f"  平均改进: {np.mean(improvements):.2f}%")
-        print(f"  最大改进: {np.max(improvements):.2f}%, 最小改进: {np.min(improvements):.2f}%")
-        print(f"  改进>10%的比例: {np.mean(improvements > 10) * 100:.1f}%")
+        print(f"\nJS divergence improvement:")
+        print(f"  Average improvement: {np.mean(improvements):.2f}%")
+        print(f"  Max improvement: {np.max(improvements):.2f}%, Min improvement: {np.min(improvements):.2f}%")
+        print(f"  Share with improvement >10%: {np.mean(improvements > 10) * 100:.1f}%")
 
-        print(f"\nJS散度统计:")
-        print(f"  原始平均JS: {np.mean(js_original):.6f}")
-        print(f"  优化后平均JS: {np.mean(js_overall):.6f}")
-        print(f"  平均降低: {np.mean(js_original - js_overall):.6f}")
+        print(f"\nJS divergence statistics:")
+        print(f"  Original mean JS: {np.mean(js_original):.6f}")
+        print(f"  Optimized mean JS: {np.mean(js_overall):.6f}")
+        print(f"  Mean reduction: {np.mean(js_original - js_overall):.6f}")
 
         # 可视化
         self._plot_batch_results(results)
 
     def _plot_batch_results(self, results):
-        """可视化批量处理结果"""
+        """Visualize batch results"""
         scales_x = np.array([r['scale_x'] for r in results])
         scales_y = np.array([r['scale_y'] for r in results])
         improvements = np.array([r['improvement'] for r in results])
@@ -689,33 +689,33 @@ class FlowDistributionScaler:
         # 1. X方向缩放因子分布
         axes[0, 0].hist(scales_x, bins=30, alpha=0.7, color='blue', edgecolor='black')
         axes[0, 0].axvline(x=np.mean(scales_x), color='red', linestyle='--',
-                           label=f'均值: {np.mean(scales_x):.3f}')
-        axes[0, 0].axvline(x=1.0, color='green', linestyle=':', label='scale=1.0')
-        axes[0, 0].set_xlabel('X方向缩放因子')
-        axes[0, 0].set_ylabel('帧数')
-        axes[0, 0].set_title('X方向缩放因子分布')
+                           label=f'Mean: {np.mean(scales_x):.3f}')
+        axes[0, 0].axvline(x=1.0, color='green', linestyle=':', label='scale = 1.0')
+        axes[0, 0].set_xlabel('Scale factor (X)')
+        axes[0, 0].set_ylabel('Frames')
+        axes[0, 0].set_title('Distribution of X scale factors')
         axes[0, 0].legend()
         axes[0, 0].grid(True, alpha=0.3)
 
         # 2. Y方向缩放因子分布
         axes[0, 1].hist(scales_y, bins=30, alpha=0.7, color='green', edgecolor='black')
         axes[0, 1].axvline(x=np.mean(scales_y), color='red', linestyle='--',
-                           label=f'均值: {np.mean(scales_y):.3f}')
-        axes[0, 1].axvline(x=1.0, color='blue', linestyle=':', label='scale=1.0')
-        axes[0, 1].set_xlabel('Y方向缩放因子')
-        axes[0, 1].set_ylabel('帧数')
-        axes[0, 1].set_title('Y方向缩放因子分布')
+                           label=f'Mean: {np.mean(scales_y):.3f}')
+        axes[0, 1].axvline(x=1.0, color='blue', linestyle=':', label='scale = 1.0')
+        axes[0, 1].set_xlabel('Scale factor (Y)')
+        axes[0, 1].set_ylabel('Frames')
+        axes[0, 1].set_title('Distribution of Y scale factors')
         axes[0, 1].legend()
         axes[0, 1].grid(True, alpha=0.3)
 
         # 3. 改进比例分布
         axes[1, 0].hist(improvements, bins=30, alpha=0.7, color='orange', edgecolor='black')
         axes[1, 0].axvline(x=np.mean(improvements), color='red', linestyle='--',
-                           label=f'平均改进: {np.mean(improvements):.1f}%')
-        axes[1, 0].axvline(x=0, color='gray', linestyle=':', label='无改进')
-        axes[1, 0].set_xlabel('JS散度改进 (%)')
-        axes[1, 0].set_ylabel('帧数')
-        axes[1, 0].set_title('分布改进比例')
+                           label=f'Mean improvement: {np.mean(improvements):.1f}%')
+        axes[1, 0].axvline(x=0, color='gray', linestyle=':', label='No improvement')
+        axes[1, 0].set_xlabel('JS divergence improvement (%)')
+        axes[1, 0].set_ylabel('Frames')
+        axes[1, 0].set_title('Distribution of improvement ratio')
         axes[1, 0].legend()
         axes[1, 0].grid(True, alpha=0.3)
 
@@ -728,13 +728,13 @@ class FlowDistributionScaler:
         axes[1, 1].plot([min_val, max_val], [min_val, max_val], 'r--',
                         label='y=x', linewidth=2, alpha=0.7)
 
-        axes[1, 1].set_xlabel('X方向缩放因子')
-        axes[1, 1].set_ylabel('Y方向缩放因子')
-        axes[1, 1].set_title('X vs Y缩放因子')
+        axes[1, 1].set_xlabel('Scale factor (X)')
+        axes[1, 1].set_ylabel('Scale factor (Y)')
+        axes[1, 1].set_title('X vs Y scale factors')
         axes[1, 1].legend()
         axes[1, 1].grid(True, alpha=0.3)
 
-        plt.suptitle('光流缩放优化批量处理结果', fontsize=14)
+        plt.suptitle('Batch results of optical-flow scaling optimization', fontsize=14)
         plt.tight_layout()
         plt.savefig('batch_optimization_results.png', dpi=150, bbox_inches='tight')
         plt.show()
@@ -743,53 +743,53 @@ class FlowDistributionScaler:
 # 使用示例
 def main():
     """
-    主函数：演示完整流程
+    Main function: demonstrate the full pipeline
     """
     # ====================================================
-    # 配置参数
+    # Configuration
     # ====================================================
     SOURCE_FOLDER = "/home/bhzhang/Documents/code/EventDiffusion/data/RAFT_flow_dataset_simple/test/optical_flow"  # 源域光流文件夹
     TARGET_FOLDER = "/home/bhzhang/Documents/assets/bdd100k_70thresh/70images_thresh/flow"  # 目标域光流文件夹
     OUTPUT_FOLDER = ""  # 输出文件夹
 
-    # 可选：已保存的源域分布文件（如果已经构建过）
+    # Optional: saved source distribution (if already built)
     SAVED_SOURCE_DIST = None  # "/path/to/saved/source/distribution"
 
     # ====================================================
-    # 步骤1：构建或加载源域分布
+    # Step 1: build or load source distribution
     # ====================================================
-    print("初始化光流缩放器...")
+    print("Initializing flow scaler...")
     scaler = FlowDistributionScaler(
-        n_samples_per_image=500,  # 每张源域图抽样500个点
-        n_kde_components=1000  # KDE使用1000个核
+        n_samples_per_image=500,  # sample 500 points per source image
+        n_kde_components=1000  # use 1000 kernels for KDE
     )
 
     if SAVED_SOURCE_DIST and os.path.exists(SAVED_SOURCE_DIST):
-        # 加载已保存的源域分布
-        print("加载已保存的源域分布...")
+        # Load saved source distribution
+        print("Loading saved source distribution...")
         scaler.load_source_distribution(SAVED_SOURCE_DIST)
     else:
-        # 构建源域分布
-        print("构建源域分布...")
+        # Build source distribution
+        print("Building source distribution...")
         scaler.build_source_distribution(SOURCE_FOLDER, grid_points=500)
 
-        # 保存源域分布（可选）
+        # Save source distribution (optional)
         if OUTPUT_FOLDER:
             source_dist_dir = os.path.join(OUTPUT_FOLDER, 'source_distribution')
             scaler.save_source_distribution(source_dist_dir)
 
     # ====================================================
-    # 步骤2：处理单个目标域图片（演示）
+    # Step 2: process a single target image (demo)
     # ====================================================
     print("\n" + "=" * 70)
-    print("演示：处理单个目标域图片")
+    print("Demo: process a single target image")
     print("=" * 70)
 
     # 获取一个目标域文件
     target_files = sorted(glob.glob(os.path.join(TARGET_FOLDER, "*.npy")))
     if target_files:
         demo_file = target_files[0]
-        print(f"演示文件: {os.path.basename(demo_file)}")
+        print(f"Demo file: {os.path.basename(demo_file)}")
 
         # 加载并优化
         target_flow = np.load(demo_file)
@@ -802,15 +802,15 @@ def main():
 
         # 打印结果
         print("\n缩放前后对比:")
-        print(f"  原始光流 X均值: {np.mean(target_flow[0]):.4f}, Y均值: {np.mean(target_flow[1]):.4f}")
-        print(f"  缩放后光流 X均值: {np.mean(scaled_flow[0]):.4f}, Y均值: {np.mean(scaled_flow[1]):.4f}")
-        print(f"  源域 X均值: {scaler.source_stats['x_mean']:.4f}, Y均值: {scaler.source_stats['y_mean']:.4f}")
+        print(f"  Original flow X mean: {np.mean(target_flow[0]):.4f}, Y mean: {np.mean(target_flow[1]):.4f}")
+        print(f"  Scaled flow X mean: {np.mean(scaled_flow[0]):.4f}, Y mean: {np.mean(scaled_flow[1]):.4f}")
+        print(f"  Source X mean: {scaler.source_stats['x_mean']:.4f}, Y mean: {scaler.source_stats['y_mean']:.4f}")
 
     # ====================================================
-    # 步骤3：批量处理目标域文件夹（完整处理）
+    # Step 3: batch process target folder (full processing)
     # ====================================================
     print("\n" + "=" * 70)
-    print("批量处理目标域文件夹")
+    print("Batch processing target folder")
     print("=" * 70)
 
     all_results = scaler.process_target_folder(
@@ -821,7 +821,7 @@ def main():
     )
 
     # ====================================================
-    # 步骤4：保存最终配置（用于推理时）
+    # Step 4: save final configuration (for inference)
     # ====================================================
     if OUTPUT_FOLDER:
         config = {
@@ -838,8 +838,8 @@ def main():
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
 
-        print(f"\n配置已保存到: {config_file}")
-        print("配置内容:")
+        print(f"\nConfig saved to: {config_file}")
+        print("Config content:")
         for key, value in config.items():
             if isinstance(value, float):
                 print(f"  {key}: {value:.4f}")
