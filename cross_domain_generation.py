@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument("--guidance_scale", type=float, default=7.5)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--repeat", type=int, default=4)
-    parser.add_argument("--source_flow_stats_dir", type=str, required=True, help="Path to source flow distribution stats for JS optimization")
+    parser.add_argument("--source_flow_stats_dir", type=str, required=True, help="Path to source flow stats dir or raw flow folder")
     parser.add_argument("--enable_xformers", action="store_true")
     parser.add_argument("--save_result_only", action="store_true")
     parser.add_argument("--binarize", action="store_true", help="Binarize generated outputs (per-channel RGB)")
@@ -123,9 +123,24 @@ def visualize(args):
     random.shuffle(rgb_files)
     print(f"Found {len(rgb_files)} images to process")
 
-    print(f"Loading source flow distribution from {args.source_flow_stats_dir}")
+    print(f"Loading/building source flow distribution from {args.source_flow_stats_dir}")
     flow_scaler = FlowDistributionScaler()
-    flow_scaler.load_source_distribution(args.source_flow_stats_dir)
+    stats_dir = args.source_flow_stats_dir
+    saved_dir = os.path.join(args.output_dir, "source_distribution")
+    if os.path.isdir(stats_dir) and os.path.exists(os.path.join(stats_dir, "source_distribution.npz")) and os.path.exists(os.path.join(stats_dir, "source_stats.json")):
+        flow_scaler.load_source_distribution(stats_dir)
+    elif os.path.isdir(saved_dir) and os.path.exists(os.path.join(saved_dir, "source_distribution.npz")) and os.path.exists(os.path.join(saved_dir, "source_stats.json")):
+        flow_scaler.load_source_distribution(saved_dir)
+    elif os.path.isdir(stats_dir):
+        has_npy = any(f.lower().endswith(".npy") for f in os.listdir(stats_dir))
+        if has_npy:
+            flow_scaler.build_source_distribution(stats_dir, grid_points=500)
+            os.makedirs(saved_dir, exist_ok=True)
+            flow_scaler.save_source_distribution(saved_dir)
+        else:
+            raise ValueError(f"No stats files or npy flows found in {stats_dir}")
+    else:
+        raise ValueError(f"Invalid path for source flow stats or folder: {stats_dir}")
 
     for file_name in tqdm(rgb_files, desc="Processing images"):
         if args.save_result_only:
