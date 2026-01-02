@@ -234,14 +234,14 @@ class FlowDistributionScaler:
 
         # 保存源域统计信息
         self.source_stats = {
-            'x_mean': np.mean(all_x_samples),
-            'x_std': np.std(all_x_samples),
-            'x_median': np.median(all_x_samples),
-            'y_mean': np.mean(all_y_samples),
-            'y_std': np.std(all_y_samples),
-            'y_median': np.median(all_y_samples),
-            'n_samples_x': len(all_x_samples),
-            'n_samples_y': len(all_y_samples)
+            'x_mean': float(np.mean(all_x_samples)),
+            'x_std': float(np.std(all_x_samples)),
+            'x_median': float(np.median(all_x_samples)),
+            'y_mean': float(np.mean(all_y_samples)),
+            'y_std': float(np.std(all_y_samples)),
+            'y_median': float(np.median(all_y_samples)),
+            'n_samples_x': int(len(all_x_samples)),
+            'n_samples_y': int(len(all_y_samples))
         }
 
         print("\nSource statistics:")
@@ -300,7 +300,17 @@ class FlowDistributionScaler:
 
         # 保存统计信息
         with open(os.path.join(save_dir, 'source_stats.json'), 'w') as f:
-            json.dump(self.source_stats, f, indent=2)
+            serializable_stats = {}
+            for k, v in self.source_stats.items():
+                if isinstance(v, (np.float32, np.float64)):
+                    serializable_stats[k] = float(v)
+                elif isinstance(v, np.integer):
+                    serializable_stats[k] = int(v)
+                elif isinstance(v, np.ndarray):
+                    serializable_stats[k] = v.tolist()
+                else:
+                    serializable_stats[k] = v
+            json.dump(serializable_stats, f, indent=2)
 
         print(f"Source distribution saved to: {save_dir}")
 
