@@ -211,7 +211,7 @@ class FlowDistributionScaler:
 
         for i, file_path in enumerate(tqdm(source_files, desc="处理源域文件")):
             # 加载光流图
-            flow = np.load(file_path)  # (2, H, W)
+            flow = np.load(file_path).squeeze()  # (2, H, W)
 
             # 分层抽样
             x_samples, y_samples = self.stratified_sampling_from_flow(
@@ -579,31 +579,26 @@ class FlowDistributionScaler:
         for i, file_path in enumerate(tqdm(target_files, desc="处理目标域文件")):
             print(f"\n处理文件 {i + 1}/{len(target_files)}: {os.path.basename(file_path)}")
 
-            try:
-                # 加载目标光流图
-                target_flow = np.load(file_path)
+            # 加载目标光流图
+            target_flow = np.load(file_path)
 
-                # 优化缩放因子
-                result = self.optimize_scale_for_single_image(target_flow)
+            # 优化缩放因子
+            result = self.optimize_scale_for_single_image(target_flow)
 
-                # 添加文件名信息
-                result['filename'] = os.path.basename(file_path)
-                result['filepath'] = file_path
+            # 添加文件名信息
+            result['filename'] = os.path.basename(file_path)
+            result['filepath'] = file_path
 
-                # 应用缩放（可选）
-                if save_scaled_flows:
-                    scaled_flow = self.apply_scaling_to_flow(
-                        target_flow, result['scale_x'], result['scale_y']
-                    )
-                    scaled_filename = f"scaled_{os.path.basename(file_path)}"
-                    np.save(os.path.join(scaled_flows_dir, scaled_filename), scaled_flow)
-                    result['scaled_file'] = os.path.join(scaled_flows_dir, scaled_filename)
+            # 应用缩放（可选）
+            if save_scaled_flows:
+                scaled_flow = self.apply_scaling_to_flow(
+                    target_flow, result['scale_x'], result['scale_y']
+                )
+                scaled_filename = f"scaled_{os.path.basename(file_path)}"
+                np.save(os.path.join(scaled_flows_dir, scaled_filename), scaled_flow)
+                result['scaled_file'] = os.path.join(scaled_flows_dir, scaled_filename)
 
-                all_results.append(result)
-
-            except Exception as e:
-                print(f"处理文件 {os.path.basename(file_path)} 时出错: {e}")
-                continue
+            all_results.append(result)
 
         # 保存结果
         if save_results and output_folder:
@@ -752,9 +747,9 @@ def main():
     # ====================================================
     # 配置参数
     # ====================================================
-    SOURCE_FOLDER = "/path/to/source/flow/folder"  # 源域光流文件夹
-    TARGET_FOLDER = "/path/to/target/flow/folder"  # 目标域光流文件夹
-    OUTPUT_FOLDER = "/path/to/output/results"  # 输出文件夹
+    SOURCE_FOLDER = "/home/bhzhang/Documents/code/EventDiffusion/data/RAFT_flow_dataset_simple/test/optical_flow"  # 源域光流文件夹
+    TARGET_FOLDER = "/home/bhzhang/Documents/assets/bdd100k_70thresh/70images_thresh/flow"  # 目标域光流文件夹
+    OUTPUT_FOLDER = ""  # 输出文件夹
 
     # 可选：已保存的源域分布文件（如果已经构建过）
     SAVED_SOURCE_DIST = None  # "/path/to/saved/source/distribution"
