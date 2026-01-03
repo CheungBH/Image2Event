@@ -165,19 +165,7 @@ def visualize(args):
         rgb_image = cv2.resize(rgb_image, (new_height, new_height))
 
         for p_idx, prompt in enumerate(args.prompts):
-            if args.event_input_dir:
-                # when events_name list is empty original logic used filename->png replacement
-                event_path = os.path.join(args.event_input_dir, file_name.replace(".jpg", ".png"))
-                event_image = cv2.imread(event_path)
-                if event_image is None:
-                    print(f"Event image not found: {event_path}, skipping event.")
-                    prompt_images = [rgb_image]
-                else:
-                    event_image = cv2.resize(event_image, (new_height, new_height))
-                    event_image = cv2.cvtColor(event_image, cv2.COLOR_BGR2RGB)
-                    prompt_images = [event_image, rgb_image]
-            else:
-                prompt_images = [rgb_image]
+            prompt_images = [rgb_image]
 
             optical_flow_path = os.path.join(args.optical_flow_input_dir, file_name.replace(".jpg", ".npy").replace(".png", ".npy"))
             if not os.path.exists(optical_flow_path):
