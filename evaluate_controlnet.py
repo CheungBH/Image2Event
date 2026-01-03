@@ -18,7 +18,7 @@ def calculate_psnr(img1, img2):
     return psnr
 
 
-def calculate_mse(img1, img2):
+def calculate_mae(img1, img2):
     """Calculates the Mean Squared Error between two images."""
     # return np.mean((img1 - img2) ** 2)
     return np.mean(np.abs(img1.astype(np.float32) - img2.astype(np.float32)))
@@ -49,7 +49,7 @@ def calculate_metrics(folder1, folder2, device, target_size=512):
         "psnr": [],
         "ssim": [],
         "lpips": [],
-        "mse": []
+        "mae": []
     }
 
     num_pairs = 0
@@ -83,7 +83,7 @@ def calculate_metrics(folder1, folder2, device, target_size=512):
 
             # --- Calculate PSNR and MSE ---
             metrics["psnr"].append(calculate_psnr(img1, img2))
-            metrics["mse"].append(calculate_mse(img1, img2))
+            metrics["mae"].append(calculate_mae(img1, img2))
 
             # --- Calculate SSIM ---
             # For SSIM, it's common to use grayscale images
@@ -124,14 +124,14 @@ def calculate_metrics(folder1, folder2, device, target_size=512):
     print(f"Average PSNR: {np.mean(metrics['psnr']):.4f}")
     print(f"Average SSIM: {np.mean(metrics['ssim']):.4f}")
     print(f"Average LPIPS: {np.mean(metrics['lpips']):.4f}")
-    print(f"Average MSE: {np.mean(metrics['mse']):.4f}")
+    print(f"Average MAE: {np.mean(metrics['mae']):.4f}")
     print(f"FID Score: {fid_value:.4f}")
     print("---------------------------\n")
     avg_metrics = {
         "psnr": np.mean(metrics["psnr"]),
         "ssim": np.mean(metrics["ssim"]),
         "lpips": np.mean(metrics["lpips"]),
-        "mse": np.mean(metrics["mse"]),
+        "mae": np.mean(metrics["mae"]),
         "fid": fid_value
     }
     return avg_metrics
