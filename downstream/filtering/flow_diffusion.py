@@ -140,7 +140,7 @@ def calculate_diffusion_score(optical_flow):
 
 
 if __name__ == '__main__':
-    flow_folder = "/home/bhzhang/Documents/code/Image2Event/assets/DSEC_RAFT_single_BDD100k/flow"
+    flow_folder = "/media/bhzhang/Crucial/diffusion_project/RAFT_asset/former_checkpoint_for_bdd100k/flow"
 
     total_score = 0.0
     count = 0

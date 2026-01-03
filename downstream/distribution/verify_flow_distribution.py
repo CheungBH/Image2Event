@@ -7,15 +7,11 @@ import sys
 import random
 from tqdm import tqdm
 
-# Add downstream to path to allow importing hist_JS_optim
-sys.path.append(os.path.join(os.path.dirname(__file__), 'downstream'))
 
 try:
-    from hist_JS_optim import FlowDistributionScaler
+    from downstream.distribution.hist_JS_optim import FlowDistributionScaler
 except ImportError:
-    print("Error: Could not import FlowDistributionScaler from downstream.hist_JS_optim")
-    print("Please make sure you are running this script from the project root.")
-    sys.exit(1)
+    from hist_JS_optim import FlowDistributionScaler
 
 def main():
     parser = argparse.ArgumentParser(description="Verify if single optical flow distribution matches global distribution")
@@ -51,18 +47,16 @@ def main():
         global_files = random.sample(flow_files, args.max_global_images)
         
     for fpath in tqdm(global_files, desc="Sampling Global"):
-        try:
-            flow = np.load(fpath)
-            # Ensure shape is (2, H, W)
-            if flow.shape[2] == 2: # (H, W, 2)
-                flow = flow.transpose(2, 0, 1)
-            
-            # Use stratified sampling from the scaler class
-            xs, ys = scaler.stratified_sampling_from_flow(flow, n_samples=args.samples_per_image)
-            all_x.extend(xs)
-            all_y.extend(ys)
-        except Exception as e:
-            print(f"Warning: Error reading {fpath}: {e}")
+
+        flow = np.load(fpath).squeeze()
+        # Ensure shape is (2, H, W)
+        if flow.shape[2] == 2: # (H, W, 2)
+            flow = flow.transpose(2, 0, 1)
+
+        # Use stratified sampling from the scaler class
+        xs, ys = scaler.stratified_sampling_from_flow(flow, n_samples=args.samples_per_image)
+        all_x.extend(xs)
+        all_y.extend(ys)
 
     all_x = np.array(all_x)
     all_y = np.array(all_y)
@@ -97,24 +91,22 @@ def main():
     
     for fpath in sample_files:
         name = os.path.basename(fpath)
-        try:
-            flow = np.load(fpath)
-            if flow.shape[2] == 2:
-                flow = flow.transpose(2, 0, 1)
-            
-            # For individual visualization, take more samples (e.g., 10k or all)
-            flat_x = flow[0].flatten()
-            flat_y = flow[1].flatten()
-            
-            # Downsample if too huge (e.g. > 20k) to save plotting time/memory
-            if len(flat_x) > 20000:
-                indices = np.random.choice(len(flat_x), 20000, replace=False)
-                flat_x = flat_x[indices]
-                flat_y = flat_y[indices]
-                
-            plot_data.append((name, flat_x, flat_y))
-        except Exception as e:
-            print(f"Error loading sample {name}: {e}")
+        flow = np.load(fpath).squeeze()
+        if flow.shape[2] == 2:
+            flow = flow.transpose(2, 0, 1)
+
+        # For individual visualization, take more samples (e.g., 10k or all)
+        flat_x = flow[0].flatten()
+        flat_y = flow[1].flatten()
+
+        # Downsample if too huge (e.g. > 20k) to save plotting time/memory
+        if len(flat_x) > 20000:
+            indices = np.random.choice(len(flat_x), 20000, replace=False)
+            flat_x = flat_x[indices]
+            flat_y = flat_y[indices]
+
+        plot_data.append((name, flat_x, flat_y))
+
 
     # --- 3. Visualization ---
     def plot_grid(component_name, data_idx, range_val, color):

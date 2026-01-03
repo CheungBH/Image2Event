@@ -879,8 +879,8 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
 
     image_transforms = transforms.Compose(
         [
-            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(args.resolution),
+            transforms.Resize((args.resolution,args.resolution), interpolation=transforms.InterpolationMode.BILINEAR),
+            # transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
             # transforms.Normalize([0.5], [0.5]),
         ]
@@ -897,8 +897,8 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
 
     conditioning_image_transforms = transforms.Compose(
         [
-            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(args.resolution),
+            transforms.Resize((args.resolution,args.resolution), interpolation=transforms.InterpolationMode.BILINEAR),
+            # transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
         ]
     )
@@ -931,7 +931,7 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
             resized_flow = np.resize(flow_raw, (args.resolution, args.resolution, 2))
             rescaled_flow = flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution))
             optical_flows.append(torch.from_numpy(rescaled_flow).permute(2, 0, 1).float())
-            optical_flows_resized.append(torch.from_numpy(rescaled_flow).permute(2, 0, 1).float())
+            # optical_flows_resized.append(torch.from_numpy(rescaled_flow).permute(2, 0, 1).float())
             # optical_flows_resized.append(
             #     flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution)))
             # optical_flows.append(flow)
@@ -940,7 +940,7 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
         examples["conditioning_pixel_values"] = conditioning_images
         examples["input_ids"] = tokenize_captions(examples)
         examples["optical_flow"] = optical_flows
-        examples["optical_flow_resized"] = optical_flows_resized
+        # examples["optical_flow_resized"] = optical_flows_resized
         examples["warped_image"], examples["warped_pixel_values"] = [], []
         examples["binary_label"] = []
         for idx in range(len(examples["optical_flow"])):

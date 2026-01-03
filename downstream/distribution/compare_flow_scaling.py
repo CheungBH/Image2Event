@@ -7,15 +7,11 @@ import sys
 import random
 from tqdm import tqdm
 
-# Add downstream to path to allow importing hist_JS_optim
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 try:
-    from hist_JS_optim import FlowDistributionScaler
+    from downstream.distribution.hist_JS_optim import FlowDistributionScaler
 except ImportError:
-    print("Error: Could not import FlowDistributionScaler from downstream.hist_JS_optim")
-    print("Please make sure you are running this script from the project root or downstream folder.")
-    sys.exit(1)
+    from hist_JS_optim import FlowDistributionScaler
+
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize target flow scaling against source distribution")
@@ -59,18 +55,15 @@ def main():
         source_files_sample = source_files
         
     for fpath in tqdm(source_files_sample, desc="Sampling Source"):
-        try:
-            flow = np.load(fpath)
-            # Ensure shape is (2, H, W)
-            if flow.shape[2] == 2: # (H, W, 2)
-                flow = flow.transpose(2, 0, 1)
-            
-            # Use stratified sampling
-            xs, ys = scaler.stratified_sampling_from_flow(flow, n_samples=args.samples_per_image)
-            all_x.extend(xs)
-            all_y.extend(ys)
-        except Exception as e:
-            print(f"Warning: Error reading {fpath}: {e}")
+        flow = np.load(fpath).squeeze()
+        # Ensure shape is (2, H, W)
+        if flow.shape[2] == 2: # (H, W, 2)
+            flow = flow.transpose(2, 0, 1)
+
+        # Use stratified sampling
+        xs, ys = scaler.stratified_sampling_from_flow(flow, n_samples=args.samples_per_image)
+        all_x.extend(xs)
+        all_y.extend(ys)
 
     source_x = np.array(all_x)
     source_y = np.array(all_y)

@@ -83,7 +83,7 @@ def get_vis_sample(dataset, sample_num=8, resolution=512):
         samples = dataset[i]
         imgs.append(resize_and_center_crop(samples['conditioning_image'], (resolution, resolution)))
         prompts.append(samples['text'])
-        flows.append(samples['optical_flow_resized'])
+        flows.append(samples['optical_flow'])
         targets.append(resize_and_center_crop(samples['image'], (resolution, resolution)))
         warped_images.append(resize_and_center_crop(samples['warped_image'], (resolution, resolution)))
     return imgs, prompts, targets, flows, warped_images

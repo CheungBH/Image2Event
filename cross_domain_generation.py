@@ -22,8 +22,7 @@ from utils.utils import *
 
 
 import sys
-sys.path.append('downstream')
-from hist_JS_optim import FlowDistributionScaler
+from downstream.distribution.hist_JS_optim import FlowDistributionScaler
 
 def parse_args():
     parser = argparse.ArgumentParser(description="ControlNet Visualization Tool")
