@@ -88,7 +88,7 @@ def run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, a
             for _ in range(args.num_validation_images):
                 with inference_ctx:
                     np_img = np.array(validation_image).astype(np.float32) / 255.0
-                    np_img = np_img * 2.0 - 1.0
+                    # np_img = np_img * 2.0 - 1.0
 
                     resized_flow = np.array(validation_flow).astype(np.float32) / args.of_norm_factor
                     resized_flow = np.transpose(resized_flow, (1,2,0))
@@ -942,11 +942,9 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
         examples["binary_label"] = []
         for idx in range(len(examples["optical_flow"])):
             img = np.array(Image.open(examples["image"][idx].filename).convert("RGB"))
+            img = cv2.resize(img, (args.resolution, args.resolution), interpolation=cv2.INTER_NEAREST)
             img_binary = (img > 127).astype(np.int_)
-            PIL_img_binary = Image.fromarray((img_binary).astype(np.uint8))
-            cropped_binary = binary_label_transform(PIL_img_binary)
-            tns_binary = torch.from_numpy(np.array(cropped_binary)).float()
-            # convert from 512,512,3 to 3,512,512
+            tns_binary = torch.from_numpy(np.array(img_binary)).float()
             examples["binary_label"].append(tns_binary.permute(2, 0, 1))
 
         if args.add_warped_image:
