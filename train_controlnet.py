@@ -88,6 +88,8 @@ def run_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, a
             for _ in range(args.num_validation_images):
                 with inference_ctx:
                     np_img = np.array(validation_image).astype(np.float32) / 255.0
+                    np_img = np_img * 2.0 - 1.0
+
                     resized_flow = np.array(validation_flow).astype(np.float32) / args.of_norm_factor
                     resized_flow = np.transpose(resized_flow, (1,2,0))
                     if args.add_warped_image:
@@ -882,7 +884,7 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
             transforms.Resize((args.resolution,args.resolution), interpolation=transforms.InterpolationMode.BILINEAR),
             # transforms.CenterCrop(args.resolution),
             transforms.ToTensor(),
-            # transforms.Normalize([0.5], [0.5]),
+            transforms.Normalize([0.5], [0.5]),
         ]
     )
 
@@ -919,7 +921,6 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
         conditioning_images = [conditioning_image_transforms(image) for image in conditioning_images]
         # flow_paths = [flow_path.replace("-Accumulate", "") for flow_path in examples["optical_flow"]]
         optical_flows = []
-        optical_flows_resized = []
         warped_image_paths = [i.replace("png", "jpg").replace("optical_flow", "warped_images") for i in
                               examples["optical_flow"]]
         for flow_path in examples["optical_flow"]:
@@ -931,10 +932,6 @@ def make_train_dataset(args, tokenizer, accelerator, phase="train"):
             resized_flow = np.resize(flow_raw, (args.resolution, args.resolution, 2))
             rescaled_flow = flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution))
             optical_flows.append(torch.from_numpy(rescaled_flow).permute(2, 0, 1).float())
-            # optical_flows_resized.append(torch.from_numpy(rescaled_flow).permute(2, 0, 1).float())
-            # optical_flows_resized.append(
-            #     flow_rescale(resized_flow, (flow_w, flow_h), (args.resolution, args.resolution)))
-            # optical_flows.append(flow)
 
         examples["pixel_values"] = images
         examples["conditioning_pixel_values"] = conditioning_images
