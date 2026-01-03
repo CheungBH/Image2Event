@@ -1132,8 +1132,11 @@ def main(args):
     text_encoder.requires_grad_(False)
     controlnet.train()
     out_log = os.path.join(args.output_dir, "log.txt")
-    out_f = open(out_log, "w")
-    out_f.write("epoch,lr,train_loss,valid_loss,psnr,ssim,lpips,mse,fid\n")
+    if not os.path.exists(out_log):
+        out_f = open(out_log, "w")
+        out_f.write("epoch,lr,train_loss,val_loss\n")
+    else:
+        out_f = open(out_log, "a")
     out_f.flush()
 
     if args.enable_xformers_memory_efficient_attention:
@@ -1551,8 +1554,8 @@ def main(args):
         avg_val_loss = val_loss / len(validation_dataloader)
 
         logger.info(f"Valid: Epoch {epoch} average loss: {avg_val_loss}")
-        # out_f.write(f"Valid: Epoch {epoch} average loss: {avg_val_loss}\n")
-        # out_f.flush()
+        out_f.write(f"{epoch},{lr_scheduler.get_last_lr()[0]},{avg_loss},{avg_val_loss}\n")
+        out_f.flush()
 
         if accelerator.is_main_process:
             # run_full_validation_inference(accelerator, vae, text_encoder, tokenizer, unet, controlnet, args, weight_dtype, validation_dataloader, epoch, out_f, train_loss=avg_loss, valid_loss=avg_val_loss, lr=lr_scheduler.get_last_lr()[0])
